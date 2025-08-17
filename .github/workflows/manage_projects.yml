@@ -21,7 +21,6 @@ jobs:
 
       - name: Run Manage Projects
         env:
-          GITHUB_TOKEN: ${{ secrets.MASTER_PROJECT_ID}}
-          MASTER_PROJECT_ID: ${{ secrets.MASTER_PROJECT_ID_2 }}
+          MASTER_PROJECT_ID: ${{ secrets.MASTER_PROJECT_ID }}
           GITHUB_REPO: "gianpy99/github-master-monitor"
         run: python scripts/manage_projects_auto_repos.py
