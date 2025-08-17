@@ -1,0 +1,27 @@
+name: Manage GitHub Projects
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '0 10 * * 1'  # Weekly sync on Monday at 10:00 UTC
+
+jobs:
+  manage:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: pip install PyGithub
+
+      - name: Run Manage Projects
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          MASTER_PROJECT_ID: ${{ secrets.MASTER_PROJECT_ID }}
+          GITHUB_REPO: "gianpy99/github-master-monitor"
+        run: python scripts/manage_projects_auto_repos.py
