@@ -96,8 +96,8 @@ COLUMNS = [
 COLORS = ["BLUE", "GREEN", "YELLOW", "PURPLE", "PINK", "ORANGE", "RED", "GRAY"]
 
 def create_status_field(project_id):
-    single_select_options = [
-        {"name": col, "color": COLORS[i % len(COLORS)], "description": ""}
+    options = [
+        {"name": col, "color": COLORS[i % len(COLORS)], "description": ""} 
         for i, col in enumerate(COLUMNS)
     ]
 
@@ -117,7 +117,8 @@ def create_status_field(project_id):
     }
     """
 
-    run_query(mutation, {"projectId": project_id, "options": single_select_options})
+    result = run_query(mutation, {"projectId": project_id, "options": options})
+    return result["data"]["createProjectV2Field"]["projectV2Field"]["id"]
 
 # --------------------
 # MASTER SYNC helpers
