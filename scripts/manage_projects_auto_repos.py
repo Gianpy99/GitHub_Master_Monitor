@@ -67,7 +67,7 @@ def get_user_id(username):
     return result["data"]["user"]["id"]
 
 def create_project_if_missing(owner_id, repo_name):
-    # Query: check if project already exists
+    # 1. Lista progetti già esistenti nell'owner
     query = """
     query($ownerId: ID!) {
       node(id: $ownerId) {
@@ -85,12 +85,12 @@ def create_project_if_missing(owner_id, repo_name):
     result = run_query(query, {"ownerId": owner_id})
     existing_projects = result["data"]["node"]["projectsV2"]["nodes"]
 
-    # Cerca se già esiste
+    # 2. Se già esiste con quel nome → riusa
     for p in existing_projects:
         if p["title"] == f"{repo_name} Project":
             return p["id"]
 
-    # Se non c’è → crea
+    # 3. Se non c’è → crealo
     mutation = """
     mutation($ownerId: ID!, $title: String!) {
       createProjectV2(input: {ownerId: $ownerId, title: $title}) {
@@ -383,7 +383,7 @@ def main():
     mapping = load_mapping()
 
     print("[INFO] Fetching user and repos...")
-    owner_id = get_user_id(USERNAME)
+    owner_id = get_user_id(USERNAME)  # recupera ID dello user
     repos = get_user_repos(USERNAME)
     print(f"[INFO] Found {len(repos)} repositories.")
     print(f"[RESULT] MASTER_PROJECT_ID={MASTER_PROJECT_ID}\n")
@@ -405,9 +405,8 @@ def main():
     # --- Repo Projects + Sync ---
     for repo in repos:
         repo_name = repo["name"]
-        repo_id = repo["id"]
-        print(f"\n[INFO] Checking repo: {repo_name}")
-        project_id = create_project_if_missing(repo_id, repo_name)
+        print(f"[INFO] Checking repo: {repo_name}")
+        project_id = create_project_if_missing(owner_id, repo_name)
         sync_project_fields(project_id)
 
         if repo_name in mapping["repos"]:
