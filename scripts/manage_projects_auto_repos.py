@@ -105,15 +105,14 @@ def create_project_if_missing(owner_id, repo_name):
     return result["data"]["createProjectV2"]["projectV2"]["id"]
 
 def sync_project_fields(project_id):
-    """Crea i campi mancanti nel progetto."""
-    # Recupera i campi esistenti
+    # Query: prendi i campi esistenti
     query = """
     query($projectId: ID!) {
       node(id: $projectId) {
         ... on ProjectV2 {
           fields(first: 50) {
             nodes {
-              ... on ProjectV2SingleSelectField {
+              ... on ProjectV2FieldCommon {
                 id
                 name
               }
@@ -123,54 +122,117 @@ def sync_project_fields(project_id):
       }
     }
     """
+
     result = run_query(query, {"projectId": project_id})
-    existing_fields = result["data"]["node"]["fields"]["nodes"]
-    existing_fields = [f for f in existing_fields if "name" in f]
-    existing_names = {f["name"] for f in existing_fields}
+    existing_fields = [f["name"] for f in result["data"]["node"]["fields"]["nodes"]]
 
-    for field in FIELDS_TO_CREATE:
-        if field["name"] in existing_names:
-            print(f"[INFO] Campo '{field['name']}' già presente")
-            continue
+    print(f"[INFO] Campi già presenti: {existing_fields}")
 
-        #options = [{"name": desc, "color": color} for desc, color in zip(field["description"], field["color"])]
-        options = [
-          {"name": "High", "color": "RED", "description": ""},
-          {"name": "Medium-High", "color": "ORANGE", "description": ""},
-          {"name": "Medium", "color": "YELLOW", "description": ""},
-          {"name": "Low", "color": "GREEN", "description": ""}
-      ]
+    # Controllo se Status già esiste
+    if "Status" in existing_fields:
+        print("[INFO] Campo 'Status' già presente")
+        return
 
-        mutation = """
-        mutation($projectId: ID!, $options: [ProjectV2SingleSelectFieldOptionInput!]!) {
-          createProjectV2Field(input: {
-            projectId: $projectId,
-            name: "Status",
-            dataType: SINGLE_SELECT,
-            singleSelectOptions: $options
-          }) {
-            projectV2Field {
-              ... on ProjectV2Field {
-                id
-                name
-                dataType
-              }
-              ... on ProjectV2SingleSelectField {
-                id
-                name
-                dataType
-                options {
-                  id
-                  name
-                }
-              }
-            }
+    # Mutation: crea il campo solo se non esiste
+    mutation = """
+    mutation($projectId: ID!, $options: [ProjectV2SingleSelectFieldOptionInput!]!) {
+      createProjectV2Field(
+        input: {
+          projectId: $projectId,
+          name: "Status",
+          dataType: SINGLE_SELECT,
+          singleSelectOptions: $options
+        }
+      ) {
+        projectV2Field {
+          ... on ProjectV2SingleSelectField {
+            id
+            name
+            dataType
           }
         }
-        """
-        result = run_query(mutation, {"projectId": project_id, "options": options})
-        field_id = result["data"]["createProjectV2Field"]["projectV2Field"]["id"]
-        print(f"[INFO] Campo '{field['name']}' creato con ID {field_id}")
+      }
+    }
+    """
+
+    options = [
+        {"name": "High", "color": "RED", "description": ""},
+        {"name": "Medium-High", "color": "ORANGE", "description": ""},
+        {"name": "Medium", "color": "YELLOW", "description": ""},
+        {"name": "Low", "color": "GREEN", "description": ""}
+    ]
+
+    result = run_query(mutation, {"projectId": project_id, "options": options})
+    print(f"[INFO] Creato nuovo campo 'Status': {result}")
+
+
+# def sync_project_fields(project_id):
+#     """Crea i campi mancanti nel progetto."""
+#     # Recupera i campi esistenti
+#     query = """
+#     query($projectId: ID!) {
+#       node(id: $projectId) {
+#         ... on ProjectV2 {
+#           fields(first: 50) {
+#             nodes {
+#               ... on ProjectV2SingleSelectField {
+#                 id
+#                 name
+#               }
+#             }
+#           }
+#         }
+#       }
+#     }
+#     """
+#     result = run_query(query, {"projectId": project_id})
+#     existing_fields = result["data"]["node"]["fields"]["nodes"]
+#     existing_fields = [f for f in existing_fields if "name" in f]
+#     existing_names = {f["name"] for f in existing_fields}
+
+#     for field in FIELDS_TO_CREATE:
+#         if field["name"] in existing_names:
+#             print(f"[INFO] Campo '{field['name']}' già presente")
+#             continue
+
+#         #options = [{"name": desc, "color": color} for desc, color in zip(field["description"], field["color"])]
+#         options = [
+#           {"name": "High", "color": "RED", "description": ""},
+#           {"name": "Medium-High", "color": "ORANGE", "description": ""},
+#           {"name": "Medium", "color": "YELLOW", "description": ""},
+#           {"name": "Low", "color": "GREEN", "description": ""}
+#       ]
+
+#         mutation = """
+#         mutation($projectId: ID!, $options: [ProjectV2SingleSelectFieldOptionInput!]!) {
+#           createProjectV2Field(input: {
+#             projectId: $projectId,
+#             name: "Status",
+#             dataType: SINGLE_SELECT,
+#             singleSelectOptions: $options
+#           }) {
+#             projectV2Field {
+#               ... on ProjectV2Field {
+#                 id
+#                 name
+#                 dataType
+#               }
+#               ... on ProjectV2SingleSelectField {
+#                 id
+#                 name
+#                 dataType
+#                 options {
+#                   id
+#                   name
+#                 }
+#               }
+#             }
+#           }
+#         }
+#         """
+#         result = run_query(mutation, {"projectId": project_id, "options": options})
+#         field_id = result["data"]["createProjectV2Field"]["projectV2Field"]["id"]
+#         print(f"[INFO] Campo '{field['name']}' creato con ID {field_id}")
 
 # --------------------
 # USER / REPO helpers
