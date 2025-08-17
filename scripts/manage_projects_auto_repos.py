@@ -138,18 +138,24 @@ def sync_project_fields(project_id):
         mutation($projectId: ID!, $options: [ProjectV2SingleSelectFieldOptionInput!]!) {
           createProjectV2Field(input: {
             projectId: $projectId,
-            name: "%s",
+            name: "Status",
             dataType: SINGLE_SELECT,
             singleSelectOptions: $options
           }) {
             projectV2Field {
               id
               name
+              dataType
+              ... on ProjectV2SingleSelectField {
+                options {
+                  id
+                  name
+                }
+              }
             }
           }
         }
-        """ % field["name"]
-
+        """
         result = run_query(mutation, {"projectId": project_id, "options": options})
         field_id = result["data"]["createProjectV2Field"]["projectV2Field"]["id"]
         print(f"[INFO] Campo '{field['name']}' creato con ID {field_id}")
