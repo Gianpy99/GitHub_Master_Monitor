@@ -218,19 +218,16 @@ def main():
     # --- Repo Projects + Sync ---
     for repo in repos:
         repo_name = repo["name"]
-        repo_id = repo["id"]
         print(f"\n[INFO] Checking repo: {repo_name}")
 
         if repo_name in mapping["repos"]:
             repo_project_id = mapping["repos"][repo_name]
             print(f"[INFO] Repo {repo_name} already tracked with Project ID: {repo_project_id}")
         else:
-            repo_projects = get_projects_for_repo(USERNAME, repo_name)
-            if repo_projects:
-                repo_project_id = repo_projects[0]["id"]
-            else:
-                repo_project_id = create_project(repo_id, f"{repo_name} Project")
-                create_status_field(repo_project_id)
+            # Qui si crea il progetto sotto il tuo account (owner_id) e non sotto il repo
+            repo_project_id = create_project(owner_id, f"{repo_name} Project")
+            create_status_field(repo_project_id)
+
             mapping["repos"][repo_name] = repo_project_id
             save_mapping(mapping)
             print(f"[INFO] Repo {repo_name} mapped with Project ID: {repo_project_id}")
