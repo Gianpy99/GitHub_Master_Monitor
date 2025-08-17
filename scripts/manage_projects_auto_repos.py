@@ -387,13 +387,13 @@ def save_mapping(mapping):
 # MAIN
 # --------------------
 def main():
-    
     mapping = load_mapping()
 
     print("[INFO] Fetching user and repos...")
     owner_id = get_user_id(USERNAME)
     repos = get_user_repos(USERNAME)
     print(f"[INFO] Found {len(repos)} repositories.")
+    print(f"[RESULT] MASTER_PROJECT_ID={MASTER_PROJECT_ID}\n")
 
     # --- Master Project ---
     master_project_id = mapping.get("master_project_id")
@@ -412,7 +412,7 @@ def main():
     # --- Repo Projects + Sync ---
     for repo in repos:
         repo_name = repo["name"]
-        #repo_id = repo["id"]
+        repo_id = repo["id"]
         print(f"\n[INFO] Checking repo: {repo_name}")
         project_id = create_project_if_missing(repo_id, repo_name)
         sync_project_fields(project_id)
