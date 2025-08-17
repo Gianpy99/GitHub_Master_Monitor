@@ -46,10 +46,25 @@ def run_query(query, variables=None):
     import requests
     import os
 
-    headers = {"Authorization": f"Bearer {os.getenv('MASTER_PROJECT_ID')}"}  # Using the auth token
+    token = os.getenv('MASTER_PROJECT_ID')
+    if not token:
+        raise Exception("MASTER_PROJECT_ID environment variable not set")
+    
+    headers = {"Authorization": f"Bearer {token}"}
     json_data = {"query": query, "variables": variables or {}}
     response = requests.post("https://api.github.com/graphql", json=json_data, headers=headers)
+    
+    # Debug: print response status and content if there's an issue
+    if response.status_code != 200:
+        print(f"[ERROR] HTTP {response.status_code}: {response.text}")
+        raise Exception(f"HTTP error {response.status_code}: {response.text}")
+    
     result = response.json()
+    
+    # Debug: print the full response if there's no 'data' key
+    if "data" not in result:
+        print(f"[ERROR] Response missing 'data' key: {result}")
+    
     if "errors" in result:
         raise Exception(f"GraphQL error: {result['errors']}")
     return result
@@ -63,6 +78,12 @@ def get_user_id(username):
     }
     """
     result = run_query(query, {"username": username})
+    
+    # Debug: check if we have the expected data structure
+    if "data" not in result or not result["data"] or "user" not in result["data"]:
+        print(f"[ERROR] Unexpected response structure: {result}")
+        raise Exception(f"Failed to get user ID for {username}")
+    
     return result["data"]["user"]["id"]
 
 def create_project_if_missing(owner_id, repo_name):
