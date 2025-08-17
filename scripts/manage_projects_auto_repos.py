@@ -83,27 +83,41 @@ def create_project(owner_id, title):
     """
     return run_query(mutation, {"ownerId": owner_id, "title": title})["data"]["createProjectV2"]["projectV2"]["id"]
 
+COLUMNS = [
+    "MVP / Idea",
+    "PRD / Defined",
+    "Dev / Implementation",
+    "Code Review / QA Prep",
+    "CI/CD / Integration",
+    "Testing / Verification",
+    "Release / Done"
+]
+
+COLORS = ["BLUE", "GREEN", "YELLOW", "PURPLE", "PINK", "ORANGE", "RED", "GRAY"]
+
 def create_status_field(project_id):
+    single_select_options = [
+        {"name": col, "color": COLORS[i % len(COLORS)], "description": ""}
+        for i, col in enumerate(COLUMNS)
+    ]
+
     mutation = """
-    mutation($projectId: ID!) {
+    mutation($projectId: ID!, $options: [ProjectV2SingleSelectFieldOptionInput!]!) {
       createProjectV2Field(input: {
         projectId: $projectId,
         name: "Status",
-        dataType: SINGLE_SELECT,
-        singleSelectOptions: [
-          {name: "PRD Defined"},
-          {name: "MVP Scoping"},
-          {name: "Development"},
-          {name: "CI/CD Setup"},
-          {name: "Testing / QA"},
-          {name: "Release Prep"},
-          {name: "Released"}
-        ]
-      }) { projectV2Field { id name } }
+        fieldType: SINGLE_SELECT,
+        singleSelectOptions: $options
+      }) {
+        projectV2Field {
+          id
+          name
+        }
+      }
     }
     """
-    run_query(mutation, {"projectId": project_id})
-    print(f"[INFO] Added Status field to project {project_id}")
+
+    run_query(mutation, {"projectId": project_id, "options": single_select_options})
 
 # --------------------
 # MASTER SYNC helpers
