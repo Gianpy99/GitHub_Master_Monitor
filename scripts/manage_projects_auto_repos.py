@@ -22,7 +22,6 @@ API_URL = "https://api.github.com/graphql"
 # --------------------
 # --- Config ---
 USERNAME = "gianpy99"
-MASTER_PROJECT_ID = "ID_MASTER"
 
 FIELDS_TO_CREATE = [
     {"name": "Status", "color": ["GRAY", "BLUE", "YELLOW", "GREEN", "RED", "ORANGE", "PURPLE"], 
