@@ -189,7 +189,68 @@ STATUS_OPTIONS = [
     {"name": "QA", "color": "PURPLE", "description": "Quality Assurance"}
 ]
 
-def get_project_items(project_id):
+def create_status_field(project_id: str):
+    """
+    Crea un campo 'Status' SINGLE_SELECT nel progetto GitHub se non esiste già.
+    """
+    options = [
+        {"name": "Backlog", "color": "GRAY", "description": "Task in Backlog"},
+        {"name": "In Progress", "color": "BLUE", "description": "Task in Progress"},
+        {"name": "Review", "color": "YELLOW", "description": "Task under Review"},
+        {"name": "Done", "color": "GREEN", "description": "Completed Task"},
+        {"name": "Blocked", "color": "RED", "description": "Blocked Task"},
+        {"name": "On Hold", "color": "ORANGE", "description": "Task on Hold"},
+        {"name": "QA", "color": "PURPLE", "description": "Quality Assurance"}
+    ]
+
+    query = """
+    query($projectId: ID!) {
+      node(id: $projectId) {
+        ... on ProjectV2 {
+          fields(first: 50) {
+            nodes {
+              __typename
+              ... on ProjectV2SingleSelectField {
+                id
+                name
+              }
+            }
+          }
+        }
+      }
+    }
+    """
+    result = run_query(query, {"projectId": project_id})
+    existing_fields = result.get("data", {}).get("node", {}).get("fields", {}).get("nodes", [])
+
+    for field in existing_fields:
+        if field.get("__typename") == "ProjectV2SingleSelectField" and field.get("name") == "Status":
+            print(f"[INFO] Field 'Status' già presente nel progetto {project_id}")
+            return field["id"]
+
+    mutation = """
+    mutation($projectId: ID!, $options: [ProjectV2SingleSelectFieldOptionInput!]!) {
+      createProjectV2Field(input: {
+        projectId: $projectId,
+        name: "Status",
+        dataType: SINGLE_SELECT,
+        singleSelectOptions: $options
+      }) {
+        projectV2Field {
+          ... on ProjectV2SingleSelectField {
+            id
+            name
+          }
+        }
+      }
+    }
+    """
+    result = run_query(mutation, {"projectId": project_id, "options": options})
+    field_id = result["data"]["createProjectV2Field"]["projectV2Field"]["id"]
+    print(f"[INFO] Campo 'Status' creato con ID {field_id}")
+    return field_id
+
+def get_project_items(project_id: str):
     """
     Recupera tutti gli item di un ProjectV2, includendo solo repository
     e leggendo correttamente i campi SINGLE_SELECT come Status.
@@ -236,9 +297,7 @@ def get_project_items(project_id):
     nodes = result.get("data", {}).get("node", {}).get("items", {}).get("nodes", [])
     for item in nodes:
         content = item.get("content")
-        content_id = None
-        if content and content.get("__typename") == "Repository":
-            content_id = content["id"]
+        content_id = content["id"] if content and content.get("__typename") == "Repository" else None
 
         status = None
         for fv in item.get("fieldValues", {}).get("nodes", []):
@@ -303,74 +362,74 @@ def get_project_fields(project_id):
     fields = run_query(query, {"id": project_id})["data"]["node"]["fields"]["nodes"]
     return {f["name"]: f["id"] for f in fields}
 
-def get_project_items(project_id):
-    """
-    Recupera tutti gli item di un ProjectV2, includendo solo repository
-    e leggendo correttamente i campi SINGLE_SELECT come Status.
-    """
-    query = """
-    query($id: ID!) {
-      node(id: $id) {
-        ... on ProjectV2 {
-          items(first: 100) {
-            nodes {
-              id
-              content {
-                __typename
-                ... on Repository {
-                  id
-                  name
-                  url
-                }
-              }
-              fieldValues(first: 10) {
-                nodes {
-                  __typename
-                  ... on ProjectV2ItemFieldSingleSelectValue {
-                    field {
-                      __typename
-                      ... on ProjectV2SingleSelectField {
-                        id
-                        name
-                      }
-                    }
-                    name
-                  }
-                }
-              }
-            }
-          }
-        }
-      }
-    }
-    """
-    items_list = []
-    result = run_query(query, {"id": project_id})
-    nodes = result.get("data", {}).get("node", {}).get("items", {}).get("nodes", [])
+# def get_project_items(project_id):
+#     """
+#     Recupera tutti gli item di un ProjectV2, includendo solo repository
+#     e leggendo correttamente i campi SINGLE_SELECT come Status.
+#     """
+#     query = """
+#     query($id: ID!) {
+#       node(id: $id) {
+#         ... on ProjectV2 {
+#           items(first: 100) {
+#             nodes {
+#               id
+#               content {
+#                 __typename
+#                 ... on Repository {
+#                   id
+#                   name
+#                   url
+#                 }
+#               }
+#               fieldValues(first: 10) {
+#                 nodes {
+#                   __typename
+#                   ... on ProjectV2ItemFieldSingleSelectValue {
+#                     field {
+#                       __typename
+#                       ... on ProjectV2SingleSelectField {
+#                         id
+#                         name
+#                       }
+#                     }
+#                     name
+#                   }
+#                 }
+#               }
+#             }
+#           }
+#         }
+#       }
+#     }
+#     """
+#     items_list = []
+#     result = run_query(query, {"id": project_id})
+#     nodes = result.get("data", {}).get("node", {}).get("items", {}).get("nodes", [])
 
-    for item in nodes:
-        content = item.get("content")
-        content_id = None
-        if content and content.get("__typename") == "Repository":
-            content_id = content["id"]
+#     for item in nodes:
+#         content = item.get("content")
+#         content_id = None
+#         if content and content.get("__typename") == "Repository":
+#             content_id = content["id"]
 
-        status = None
-        for fv in item.get("fieldValues", {}).get("nodes", []):
-            if fv.get("__typename") != "ProjectV2ItemFieldSingleSelectValue":
-                continue
-            field = fv.get("field")
-            if not field or field.get("__typename") != "ProjectV2SingleSelectField":
-                continue
-            if field.get("name") == "Status":
-                status = fv.get("name")
+#         status = None
+#         for fv in item.get("fieldValues", {}).get("nodes", []):
+#             if fv.get("__typename") != "ProjectV2ItemFieldSingleSelectValue":
+#                 continue
+#             field = fv.get("field")
+#             if not field or field.get("__typename") != "ProjectV2SingleSelectField":
+#                 continue
+#             if field.get("name") == "Status":
+#                 status = fv.get("name")
 
-        items_list.append({
-            "item_id": item["id"],
-            "repo_id": content_id,
-            "status": status
-        })
+#         items_list.append({
+#             "item_id": item["id"],
+#             "repo_id": content_id,
+#             "status": status
+#         })
 
-    return items_list
+#     return items_list
 
 def add_repo_item_to_master(master_project_id, repo_id, status):
     mutation_add = """
