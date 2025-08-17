@@ -158,11 +158,11 @@ def sync_project_fields(project_id):
 # --------------------
 # USER / REPO helpers
 # --------------------
-def get_user_id(username):
-    query = """
-    query($login: String!) { user(login: $login) { id } }
-    """
-    return run_query(query, {"login": username})["data"]["user"]["id"]
+#def get_user_id(username):
+#    query = """
+#    query($login: String!) { user(login: $login) { id } }
+#    """
+#    return run_query(query, {"login": username})["data"]["user"]["id"]
 
 def get_user_repositories(username):
     query = """
@@ -176,6 +176,21 @@ def get_user_repositories(username):
     """
     return run_query(query, {"login": username})["data"]["user"]["repositories"]["nodes"]
 
+def get_user_repos(username):
+    query = """
+    query($username: String!) {
+      user(login: $username) {
+        repositories(first: 100, ownerAffiliations: OWNER) {
+          nodes {
+            id
+            name
+          }
+        }
+      }
+    }
+    """
+    result = run_query(query, {"username": username})
+    return result["data"]["user"]["repositories"]["nodes"]
 # --------------------
 # PROJECT helpers
 # --------------------
