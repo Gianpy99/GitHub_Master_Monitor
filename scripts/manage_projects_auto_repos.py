@@ -278,7 +278,6 @@ def sync_project_fields(project_id: str):
     else:
         print(f"[INFO] 'Status' field already exists for project {project_id}")
 
-
 # --------------------
 # MASTER SYNC helpers
 # --------------------
@@ -292,18 +291,36 @@ def get_project_fields(project_id):
     return {f["name"]: f["id"] for f in fields}
 
 def get_project_items(project_id):
+    """
+    Recupera tutti gli item di un ProjectV2, includendo solo repository
+    e leggendo correttamente i campi SINGLE_SELECT come Status.
+    """
     query = """
-    query($id:ID!){
-      node(id:$id){
-        ... on ProjectV2{
-          items(first:100){
-            nodes{
+    query($id: ID!) {
+      node(id: $id) {
+        ... on ProjectV2 {
+          items(first: 100) {
+            nodes {
               id
-              content { ... on Repository { id name url } }
-              fieldValues(first:10){
-                nodes{
-                  ... on ProjectV2ItemFieldSingleSelectValue{
-                    field { id name }
+              content {
+                __typename
+                ... on Repository {
+                  id
+                  name
+                  url
+                }
+              }
+              fieldValues(first: 10) {
+                nodes {
+                  __typename
+                  ... on ProjectV2ItemFieldSingleSelectValue {
+                    field {
+                      __typename
+                      ... on ProjectV2SingleSelectField {
+                        id
+                        name
+                      }
+                    }
                     name
                   }
                 }
@@ -316,13 +333,30 @@ def get_project_items(project_id):
     """
     items_list = []
     result = run_query(query, {"id": project_id})
-    for item in result["data"]["node"]["items"]["nodes"]:
+    nodes = result.get("data", {}).get("node", {}).get("items", {}).get("nodes", [])
+
+    for item in nodes:
+        content = item.get("content")
+        content_id = None
+        if content and content.get("__typename") == "Repository":
+            content_id = content["id"]
+
         status = None
-        content_id = item["content"]["id"] if item["content"] else None
-        for fv in item["fieldValues"]["nodes"]:
-            if fv["field"]["name"] == "Status":
-                status = fv["name"]
-        items_list.append({"item_id": item["id"], "repo_id": content_id, "status": status})
+        for fv in item.get("fieldValues", {}).get("nodes", []):
+            if fv.get("__typename") != "ProjectV2ItemFieldSingleSelectValue":
+                continue
+            field = fv.get("field")
+            if not field or field.get("__typename") != "ProjectV2SingleSelectField":
+                continue
+            if field.get("name") == "Status":
+                status = fv.get("name")
+
+        items_list.append({
+            "item_id": item["id"],
+            "repo_id": content_id,
+            "status": status
+        })
+
     return items_list
 
 def add_repo_item_to_master(master_project_id, repo_id, status):
