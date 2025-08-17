@@ -67,7 +67,7 @@ def get_user_id(username):
     return result["data"]["user"]["id"]
 
 def create_project_if_missing(owner_id, repo_name):
-    # Recupera tutti i progetti dell'utente
+    # Query: check if project already exists
     query = """
     query($ownerId: ID!) {
       node(id: $ownerId) {
@@ -84,26 +84,25 @@ def create_project_if_missing(owner_id, repo_name):
     """
     result = run_query(query, {"ownerId": owner_id})
     existing_projects = result["data"]["node"]["projectsV2"]["nodes"]
+
+    # Cerca se già esiste
     for p in existing_projects:
         if p["title"] == f"{repo_name} Project":
-            print(f"[INFO] Progetto già presente per {repo_name}")
             return p["id"]
 
-    # Crea il progetto a livello utente
+    # Se non c’è → crea
     mutation = """
     mutation($ownerId: ID!, $title: String!) {
       createProjectV2(input: {ownerId: $ownerId, title: $title}) {
         projectV2 {
           id
+          title
         }
       }
     }
     """
     result = run_query(mutation, {"ownerId": owner_id, "title": f"{repo_name} Project"})
-    project_id = result["data"]["createProjectV2"]["projectV2"]["id"]
-    print(f"[INFO] Progetto creato per {repo_name} con ID {project_id}")
-    return project_id
-
+    return result["data"]["createProjectV2"]["projectV2"]["id"]
 
 def sync_project_fields(project_id):
     """Crea i campi mancanti nel progetto."""
@@ -158,12 +157,6 @@ def sync_project_fields(project_id):
 # --------------------
 # USER / REPO helpers
 # --------------------
-#def get_user_id(username):
-#    query = """
-#    query($login: String!) { user(login: $login) { id } }
-#    """
-#    return run_query(query, {"login": username})["data"]["user"]["id"]
-
 def get_user_repositories(username):
     query = """
     query($login: String!) {
