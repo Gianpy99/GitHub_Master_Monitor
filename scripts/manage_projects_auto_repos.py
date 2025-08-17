@@ -500,10 +500,28 @@ def save_mapping(mapping):
 def main():
     mapping = load_mapping()
 
+    # Debug: List all environment variables that might be related
+    print("[DEBUG] Checking environment variables...")
+    for key in os.environ.keys():
+        if 'PROJECT' in key.upper() or 'GITHUB' in key.upper() or 'TOKEN' in key.upper():
+            value = os.environ[key]
+            # Mask tokens for security, show length and first few chars
+            if len(value) > 10:
+                print(f"[DEBUG] {key}: length={len(value)}, starts with '{value[:6]}...'")
+            else:
+                print(f"[DEBUG] {key}: '{value}'")
+
     # Test authentication first
     token = os.environ.get("MASTER_PROJECT_ID")
     if not token:
-        raise Exception("MASTER_PROJECT_ID environment variable not set")
+        # Try alternative environment variable names
+        token = os.environ.get("GITHUB_TOKEN")
+        if token:
+            print("[INFO] Using GITHUB_TOKEN instead of MASTER_PROJECT_ID")
+        else:
+            print("[ERROR] No authentication token found in environment variables")
+            print("[ERROR] Available env vars:", [k for k in os.environ.keys() if 'TOKEN' in k.upper() or 'PROJECT' in k.upper()])
+            raise Exception("No GitHub token found in environment variables")
     
     # Debug token info
     print(f"[DEBUG] Token length: {len(token)}")
@@ -554,29 +572,33 @@ def main():
     # --- Master Project ---
     master_project_id = mapping.get("master_project_id")
     
-    # Check if we have a predefined master project ID from environment
-    env_master_project_id = os.environ.get("MASTER_PROJECT_ID_2")
+    print(f"[DEBUG] master_project_id from mapping: {master_project_id}")
     
     if not master_project_id:
-        if env_master_project_id:
-            # Use the predefined master project ID from environment
-            master_project_id = env_master_project_id
-            print(f"[INFO] Using predefined master project ID from environment")
+        # Look for existing or create new master project
+        print(f"[INFO] Looking for existing projects for user {USERNAME}...")
+        projects = get_projects_for_owner(USERNAME)
+        print(f"[DEBUG] Found {len(projects)} existing projects")
+        for p in projects:
+            print(f"[DEBUG] Project: '{p['title']}' - ID: {p['id']}")
+        
+        master_project = next((p for p in projects if p["title"] == MASTER_PROJECT_TITLE), None)
+        if master_project:
+            master_project_id = master_project["id"]
+            print(f"[INFO] Found existing master project: {master_project_id}")
         else:
-            # Look for existing or create new master project
-            projects = get_projects_for_owner(USERNAME)
-            master_project = next((p for p in projects if p["title"] == MASTER_PROJECT_TITLE), None)
-            if master_project:
-                master_project_id = master_project["id"]
-            else:
-                master_project_id = create_project(owner_id, MASTER_PROJECT_TITLE)
-                create_status_field(master_project_id)
+            print(f"[INFO] Creating new master project titled '{MASTER_PROJECT_TITLE}'...")
+            master_project_id = create_project(owner_id, MASTER_PROJECT_TITLE)
+            create_status_field(master_project_id)
+            print(f"[INFO] Created new master project: {master_project_id}")
         
         mapping["master_project_id"] = master_project_id
         save_mapping(mapping)
-    print(f"[RESULT] MASTER_PROJECT_ID={master_project_id}")
+    
+    print(f"[INFO] Final Master Project ID: {master_project_id}")
 
     # Ensure master project has required fields
+    print(f"[DEBUG] About to sync fields for project ID: {master_project_id}")
     sync_project_fields(master_project_id)
 
     # --- Repo Projects + Sync ---
