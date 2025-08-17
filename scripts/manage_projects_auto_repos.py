@@ -143,10 +143,15 @@ def sync_project_fields(project_id):
             singleSelectOptions: $options
           }) {
             projectV2Field {
-              id
-              name
-              dataType
+              ... on ProjectV2Field {
+                id
+                name
+                dataType
+              }
               ... on ProjectV2SingleSelectField {
+                id
+                name
+                dataType
                 options {
                   id
                   name
