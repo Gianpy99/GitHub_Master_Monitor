@@ -90,7 +90,7 @@ def create_project_if_missing(owner_id, repo_name):
         if p["title"] == f"{repo_name} Project":
             return p["id"]
 
-    # 3. Se non c’è → crealo
+    # 3. Se non c'è → crealo
     mutation = """
     mutation($ownerId: ID!, $title: String!) {
       createProjectV2(input: {ownerId: $ownerId, title: $title}) {
@@ -252,8 +252,8 @@ def create_status_field(project_id: str):
 
 def get_project_items(project_id: str):
     """
-    Recupera tutti gli item di un ProjectV2, includendo solo repository
-    e leggendo correttamente i campi SINGLE_SELECT come Status.
+    Recupera tutti gli item di un ProjectV2, gestendo correttamente i diversi tipi di contenuto
+    (Issue, PullRequest, DraftIssue) e leggendo i campi SINGLE_SELECT come Status.
     """
     query = """
     query($id: ID!) {
@@ -264,10 +264,25 @@ def get_project_items(project_id: str):
               id
               content {
                 __typename
-                ... on Repository {
+                ... on Issue {
                   id
-                  name
-                  url
+                  title
+                  repository {
+                    id
+                    name
+                  }
+                }
+                ... on PullRequest {
+                  id
+                  title
+                  repository {
+                    id
+                    name
+                  }
+                }
+                ... on DraftIssue {
+                  id
+                  title
                 }
               }
               fieldValues(first: 10) {
@@ -297,7 +312,16 @@ def get_project_items(project_id: str):
     nodes = result.get("data", {}).get("node", {}).get("items", {}).get("nodes", [])
     for item in nodes:
         content = item.get("content")
-        content_id = content["id"] if content and content.get("__typename") == "Repository" else None
+        content_id = None
+        repo_id = None
+        
+        if content:
+            content_type = content.get("__typename")
+            content_id = content.get("id")
+            
+            # For Issues and PullRequests, get the repository ID
+            if content_type in ["Issue", "PullRequest"] and "repository" in content:
+                repo_id = content["repository"]["id"]
 
         status = None
         for fv in item.get("fieldValues", {}).get("nodes", []):
@@ -311,7 +335,8 @@ def get_project_items(project_id: str):
 
         items_list.append({
             "item_id": item["id"],
-            "repo_id": content_id,
+            "content_id": content_id,
+            "repo_id": repo_id,
             "status": status
         })
 
@@ -362,100 +387,76 @@ def get_project_fields(project_id):
     fields = run_query(query, {"id": project_id})["data"]["node"]["fields"]["nodes"]
     return {f["name"]: f["id"] for f in fields}
 
-# def get_project_items(project_id):
-#     """
-#     Recupera tutti gli item di un ProjectV2, includendo solo repository
-#     e leggendo correttamente i campi SINGLE_SELECT come Status.
-#     """
-#     query = """
-#     query($id: ID!) {
-#       node(id: $id) {
-#         ... on ProjectV2 {
-#           items(first: 100) {
-#             nodes {
-#               id
-#               content {
-#                 __typename
-#                 ... on Repository {
-#                   id
-#                   name
-#                   url
-#                 }
-#               }
-#               fieldValues(first: 10) {
-#                 nodes {
-#                   __typename
-#                   ... on ProjectV2ItemFieldSingleSelectValue {
-#                     field {
-#                       __typename
-#                       ... on ProjectV2SingleSelectField {
-#                         id
-#                         name
-#                       }
-#                     }
-#                     name
-#                   }
-#                 }
-#               }
-#             }
-#           }
-#         }
-#       }
-#     }
-#     """
-#     items_list = []
-#     result = run_query(query, {"id": project_id})
-#     nodes = result.get("data", {}).get("node", {}).get("items", {}).get("nodes", [])
-
-#     for item in nodes:
-#         content = item.get("content")
-#         content_id = None
-#         if content and content.get("__typename") == "Repository":
-#             content_id = content["id"]
-
-#         status = None
-#         for fv in item.get("fieldValues", {}).get("nodes", []):
-#             if fv.get("__typename") != "ProjectV2ItemFieldSingleSelectValue":
-#                 continue
-#             field = fv.get("field")
-#             if not field or field.get("__typename") != "ProjectV2SingleSelectField":
-#                 continue
-#             if field.get("name") == "Status":
-#                 status = fv.get("name")
-
-#         items_list.append({
-#             "item_id": item["id"],
-#             "repo_id": content_id,
-#             "status": status
-#         })
-
-#     return items_list
-
-def add_repo_item_to_master(master_project_id, repo_id, status):
-    mutation_add = """
-    mutation($projectId:ID!, $contentId:ID!){
-      addProjectV2ItemById(input:{projectId:$projectId, contentId:$contentId}){
-        item { id }
+def add_repo_to_master_project(master_project_id, repo_id, repo_name, status="Backlog"):
+    """
+    Adds a repository as a project item to the master project.
+    Since repositories can't be added directly as items, we create a draft issue instead.
+    """
+    # Create a draft issue to represent the repository
+    mutation_draft = """
+    mutation($projectId: ID!, $title: String!, $body: String!) {
+      addProjectV2DraftIssue(input: {
+        projectId: $projectId,
+        title: $title,
+        body: $body
+      }) {
+        projectItem {
+          id
+        }
       }
     }
     """
-    result = run_query(mutation_add, {"projectId": master_project_id, "contentId": repo_id})
-    item_id = result["data"]["addProjectV2ItemById"]["item"]["id"]
+    
+    draft_title = f"Repository: {repo_name}"
+    draft_body = f"This item represents the repository {repo_name} for project tracking purposes."
+    
+    result = run_query(mutation_draft, {
+        "projectId": master_project_id,
+        "title": draft_title,
+        "body": draft_body
+    })
+    
+    item_id = result["data"]["addProjectV2DraftIssue"]["projectItem"]["id"]
 
+    # Set the status field
     master_fields = get_project_fields(master_project_id)
-    status_field_id = master_fields["Status"]
+    if "Status" in master_fields:
+        status_field_id = master_fields["Status"]
+        
+        mutation_status = """
+        mutation($itemId: ID!, $fieldId: ID!, $value: String!) {
+          updateProjectV2ItemField(input: {
+            itemId: $itemId,
+            fieldId: $fieldId,
+            value: $value
+          }) {
+            projectV2Item { id }
+          }
+        }
+        """
+        
+        run_query(mutation_status, {
+            "itemId": item_id,
+            "fieldId": status_field_id,
+            "value": status
+        })
 
-    mutation_status = """
-    mutation($itemId:ID!, $fieldId:ID!, $value:String!){
-      updateProjectV2ItemField(input:{
-        itemId:$itemId,
-        fieldId:$fieldId,
-        value:$value
-      }) { projectV2Item { id } }
-    }
+    print(f"[SYNC] Added repo {repo_name} to Master project with status '{status}'")
+    return item_id
+
+def check_repo_in_master(master_project_id, repo_name):
     """
-    run_query(mutation_status, {"itemId": item_id, "fieldId": status_field_id, "value": status})
-    print(f"[SYNC] Added repo {repo_id} to Master with status '{status}'")
+    Check if a repository (represented as a draft issue) already exists in the master project.
+    """
+    items = get_project_items(master_project_id)
+    for item in items:
+        # Check if there's a draft issue with the repository name
+        content = item.get("content")
+        if content and content.get("__typename") == "DraftIssue":
+            title = content.get("title", "")
+            if f"Repository: {repo_name}" in title:
+                return True
+    return False
 
 # --------------------
 # JSON mapping helpers
@@ -480,7 +481,6 @@ def main():
     owner_id = get_user_id(USERNAME)  # recupera ID dello user
     repos = get_user_repos(USERNAME)
     print(f"[INFO] Found {len(repos)} repositories.")
-    print(f"[RESULT] MASTER_PROJECT_ID={MASTER_PROJECT_ID}\n")
 
     # --- Master Project ---
     master_project_id = mapping.get("master_project_id")
@@ -496,10 +496,16 @@ def main():
         save_mapping(mapping)
     print(f"[RESULT] MASTER_PROJECT_ID={master_project_id}")
 
+    # Ensure master project has required fields
+    sync_project_fields(master_project_id)
+
     # --- Repo Projects + Sync ---
     for repo in repos:
         repo_name = repo["name"]
+        repo_id = repo["id"]
         print(f"[INFO] Checking repo: {repo_name}")
+        
+        # Create or get project for this repo
         project_id = create_project_if_missing(owner_id, repo_name)
         sync_project_fields(project_id)
 
@@ -507,22 +513,17 @@ def main():
             repo_project_id = mapping["repos"][repo_name]
             print(f"[INFO] Repo {repo_name} already tracked with Project ID: {repo_project_id}")
         else:
-            # Qui si crea il progetto sotto il tuo account (owner_id) e non sotto il repo
-            repo_project_id = create_project(owner_id, f"{repo_name} Project")
-            create_status_field(repo_project_id)
-
+            repo_project_id = project_id
             mapping["repos"][repo_name] = repo_project_id
             save_mapping(mapping)
             print(f"[INFO] Repo {repo_name} mapped with Project ID: {repo_project_id}")
 
         # --- Sync to Master ---
-        items = get_project_items(repo_project_id)
-        master_items = get_project_items(master_project_id)
-        master_repo_ids = {item["repo_id"] for item in master_items if item["repo_id"]}
-
-        for item in items:
-            if item["repo_id"] not in master_repo_ids and item["repo_id"]:
-                add_repo_item_to_master(master_project_id, item["repo_id"], item["status"] or "PRD Defined")
+        # Check if this repo is already represented in the master project
+        if not check_repo_in_master(master_project_id, repo_name):
+            add_repo_to_master_project(master_project_id, repo_id, repo_name, "Backlog")
+        else:
+            print(f"[INFO] Repo {repo_name} already exists in master project")
 
 if __name__ == "__main__":
     main()
