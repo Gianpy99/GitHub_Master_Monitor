@@ -95,32 +95,67 @@ COLUMNS = [
 
 COLORS = ["BLUE", "GREEN", "YELLOW", "PURPLE", "PINK", "ORANGE", "RED"]
 
-def create_status_field(project_id):
+def create_status_field(project_id: str):
+    """
+    Crea un campo 'Status' SINGLE_SELECT nel progetto GitHub se non esiste già.
+    """
+    # Opzioni della select con colore e descrizione
     options = [
-        {"name": col, "color": COLORS[i % len(COLORS)], "description": ""}
-        for i, col in enumerate(COLUMNS)
+        {"name": "Backlog", "color": "GRAY", "description": "Task in Backlog"},
+        {"name": "In Progress", "color": "BLUE", "description": "Task in Progress"},
+        {"name": "Review", "color": "YELLOW", "description": "Task under Review"},
+        {"name": "Done", "color": "GREEN", "description": "Completed Task"},
+        {"name": "Blocked", "color": "RED", "description": "Blocked Task"},
+        {"name": "On Hold", "color": "ORANGE", "description": "Task on Hold"},
+        {"name": "QA", "color": "PURPLE", "description": "Quality Assurance"}
     ]
+
+    # Recupera i campi esistenti del progetto
+    query = """
+    query($projectId: ID!) {
+      node(id: $projectId) {
+        ... on ProjectV2 {
+          fields(first: 50) {
+            nodes {
+              ... on ProjectV2SingleSelectField {
+                id
+                name
+              }
+            }
+          }
+        }
+      }
+    }
+    """
+    result = run_query(query, {"projectId": project_id})
+    existing_fields = result["data"]["node"]["fields"]["nodes"]
+    
+    # Controlla se il campo Status esiste già
+    for field in existing_fields:
+        if field["name"] == "Status":
+            print(f"[INFO] Field 'Status' già presente nel progetto {project_id}")
+            return field["id"]
+
+    # Crea il campo SINGLE_SELECT
     mutation = """
-
     mutation($projectId: ID!, $options: [ProjectV2SingleSelectFieldOptionInput!]!) {
-        createProjectV2Field(input: {
-            projectId: $projectId, 
-            name: "Status",
-            dataType: SINGLE_SELECT,
-            singleSelectOptions: $options
-        }) {
+      createProjectV2Field(input: {
+        projectId: $projectId,
+        name: "Status",
+        dataType: SINGLE_SELECT,
+        singleSelectOptions: $options
+      }) {
         projectV2Field {
-        __typename
-        ... on ProjectV2SingleSelectField {
-        id
-        name
+          id
+          name
+        }
+      }
     }
-    }
-    }
-    }"""
-
+    """
     result = run_query(mutation, {"projectId": project_id, "options": options})
-    return result["data"]["createProjectV2Field"]["projectV2Field"]["id"]
+    field_id = result["data"]["createProjectV2Field"]["projectV2Field"]["id"]
+    print(f"[INFO] Campo 'Status' creato con ID {field_id}")
+    return field_id
 
 # --------------------
 # MASTER SYNC helpers
