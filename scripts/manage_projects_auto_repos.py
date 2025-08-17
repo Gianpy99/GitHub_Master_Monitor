@@ -6,7 +6,7 @@ import requests
 # CONFIG
 # --------------------
 GITHUB_TOKEN = os.environ.get("MASTER_PROJECT_ID")  # This contains your auth token
-USERNAME = "gianpy99"
+USERNAME = "Gianpy99"
 MASTER_PROJECT_TITLE = "Master Project"
 MAPPING_FILE = "repo_project_mapping.json"
 
@@ -20,8 +20,6 @@ API_URL = "https://api.github.com/graphql"
 # --------------------
 # GRAPHQL helper
 # --------------------
-# --- Config ---
-USERNAME = "gianpy99"
 
 FIELDS_TO_CREATE = [
     {"name": "Status", "color": ["GRAY", "BLUE", "YELLOW", "GREEN", "RED", "ORANGE", "PURPLE"], 
@@ -574,11 +572,25 @@ def main():
     
     print(f"[DEBUG] master_project_id from mapping: {master_project_id}")
     
-    if not master_project_id:
-        # Look for existing or create new master project
+    # FORCE CLEAR any placeholder or invalid IDs
+    if master_project_id == "ID_MASTER":
+        print(f"[INFO] DETECTED PLACEHOLDER 'ID_MASTER' - FORCE CLEARING")
+        master_project_id = None
+    elif not master_project_id:
+        print(f"[INFO] No master project ID found")
+        master_project_id = None
+    elif len(str(master_project_id)) < 10:
+        print(f"[INFO] Invalid master project ID (too short): '{master_project_id}' - CLEARING")
+        master_project_id = None
+    else:
+        print(f"[INFO] Using existing master project ID: {master_project_id}")
+    
+    # Always regenerate if we don't have a valid ID
+    if master_project_id is None:
         print(f"[INFO] Looking for existing projects for user {USERNAME}...")
         projects = get_projects_for_owner(USERNAME)
         print(f"[DEBUG] Found {len(projects)} existing projects")
+        
         for p in projects:
             print(f"[DEBUG] Project: '{p['title']}' - ID: {p['id']}")
         
@@ -592,8 +604,10 @@ def main():
             create_status_field(master_project_id)
             print(f"[INFO] Created new master project: {master_project_id}")
         
+        # Save the real project ID
         mapping["master_project_id"] = master_project_id
         save_mapping(mapping)
+        print(f"[INFO] Saved real master project ID to mapping file")
     
     print(f"[INFO] Final Master Project ID: {master_project_id}")
 
