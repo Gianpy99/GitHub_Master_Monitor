@@ -101,21 +101,23 @@ def create_status_field(project_id):
         for i, col in enumerate(COLUMNS)
     ]
 
-    mutation = """
     mutation($projectId: ID!, $options: [ProjectV2SingleSelectFieldOptionInput!]!) {
-      createProjectV2Field(input: {
-        projectId: $projectId,
-        name: "Status",
-        dataType: SINGLE_SELECT,
-        singleSelectOptions: $options
-      }) {
+        createProjectV2Field(input: {
+            projectId: $projectId, 
+            name: "Status",
+            dataType: SINGLE_SELECT,
+            singleSelectOptions: $options
+        }) {
         projectV2Field {
-          id
-          name
-        }
-      }
+        __typename
+        ... on ProjectV2SingleSelectField {
+        id
+        name
     }
-    """
+    }
+    }
+    }
+
     result = run_query(mutation, {"projectId": project_id, "options": options})
     return result["data"]["createProjectV2Field"]["projectV2Field"]["id"]
 
