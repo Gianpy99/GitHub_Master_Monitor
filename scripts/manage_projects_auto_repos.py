@@ -104,136 +104,6 @@ def create_project_if_missing(owner_id, repo_name):
     result = run_query(mutation, {"ownerId": owner_id, "title": f"{repo_name} Project"})
     return result["data"]["createProjectV2"]["projectV2"]["id"]
 
-def sync_project_fields(project_id):
-    # Query: prendi i campi esistenti
-    query = """
-    query($projectId: ID!) {
-      node(id: $projectId) {
-        ... on ProjectV2 {
-          fields(first: 50) {
-            nodes {
-              ... on ProjectV2FieldCommon {
-                id
-                name
-              }
-            }
-          }
-        }
-      }
-    }
-    """
-
-    result = run_query(query, {"projectId": project_id})
-    existing_fields = [f["name"] for f in result["data"]["node"]["fields"]["nodes"]]
-
-    print(f"[INFO] Campi già presenti: {existing_fields}")
-
-    # Controllo se Status già esiste
-    if "Status" in existing_fields:
-        print("[INFO] Campo 'Status' già presente")
-        return
-
-    # Mutation: crea il campo solo se non esiste
-    mutation = """
-    mutation($projectId: ID!, $options: [ProjectV2SingleSelectFieldOptionInput!]!) {
-      createProjectV2Field(
-        input: {
-          projectId: $projectId,
-          name: "Status",
-          dataType: SINGLE_SELECT,
-          singleSelectOptions: $options
-        }
-      ) {
-        projectV2Field {
-          ... on ProjectV2SingleSelectField {
-            id
-            name
-            dataType
-          }
-        }
-      }
-    }
-    """
-
-    options = [
-        {"name": "High", "color": "RED", "description": ""},
-        {"name": "Medium-High", "color": "ORANGE", "description": ""},
-        {"name": "Medium", "color": "YELLOW", "description": ""},
-        {"name": "Low", "color": "GREEN", "description": ""}
-    ]
-
-    result = run_query(mutation, {"projectId": project_id, "options": options})
-    print(f"[INFO] Creato nuovo campo 'Status': {result}")
-
-
-# def sync_project_fields(project_id):
-#     """Crea i campi mancanti nel progetto."""
-#     # Recupera i campi esistenti
-#     query = """
-#     query($projectId: ID!) {
-#       node(id: $projectId) {
-#         ... on ProjectV2 {
-#           fields(first: 50) {
-#             nodes {
-#               ... on ProjectV2SingleSelectField {
-#                 id
-#                 name
-#               }
-#             }
-#           }
-#         }
-#       }
-#     }
-#     """
-#     result = run_query(query, {"projectId": project_id})
-#     existing_fields = result["data"]["node"]["fields"]["nodes"]
-#     existing_fields = [f for f in existing_fields if "name" in f]
-#     existing_names = {f["name"] for f in existing_fields}
-
-#     for field in FIELDS_TO_CREATE:
-#         if field["name"] in existing_names:
-#             print(f"[INFO] Campo '{field['name']}' già presente")
-#             continue
-
-#         #options = [{"name": desc, "color": color} for desc, color in zip(field["description"], field["color"])]
-#         options = [
-#           {"name": "High", "color": "RED", "description": ""},
-#           {"name": "Medium-High", "color": "ORANGE", "description": ""},
-#           {"name": "Medium", "color": "YELLOW", "description": ""},
-#           {"name": "Low", "color": "GREEN", "description": ""}
-#       ]
-
-#         mutation = """
-#         mutation($projectId: ID!, $options: [ProjectV2SingleSelectFieldOptionInput!]!) {
-#           createProjectV2Field(input: {
-#             projectId: $projectId,
-#             name: "Status",
-#             dataType: SINGLE_SELECT,
-#             singleSelectOptions: $options
-#           }) {
-#             projectV2Field {
-#               ... on ProjectV2Field {
-#                 id
-#                 name
-#                 dataType
-#               }
-#               ... on ProjectV2SingleSelectField {
-#                 id
-#                 name
-#                 dataType
-#                 options {
-#                   id
-#                   name
-#                 }
-#               }
-#             }
-#           }
-#         }
-#         """
-#         result = run_query(mutation, {"projectId": project_id, "options": options})
-#         field_id = result["data"]["createProjectV2Field"]["projectV2Field"]["id"]
-#         print(f"[INFO] Campo '{field['name']}' creato con ID {field_id}")
-
 # --------------------
 # USER / REPO helpers
 # --------------------
@@ -309,22 +179,21 @@ COLUMNS = [
 
 COLORS = ["BLUE", "GREEN", "YELLOW", "PURPLE", "PINK", "ORANGE", "RED"]
 
+STATUS_OPTIONS = [
+    {"name": "Backlog", "color": "GRAY", "description": "Task in Backlog"},
+    {"name": "In Progress", "color": "BLUE", "description": "Task in Progress"},
+    {"name": "Review", "color": "YELLOW", "description": "Task under Review"},
+    {"name": "Done", "color": "GREEN", "description": "Completed Task"},
+    {"name": "Blocked", "color": "RED", "description": "Blocked Task"},
+    {"name": "On Hold", "color": "ORANGE", "description": "Task on Hold"},
+    {"name": "QA", "color": "PURPLE", "description": "Quality Assurance"}
+]
+
 def create_status_field(project_id: str):
     """
-    Crea un campo 'Status' SINGLE_SELECT nel progetto GitHub se non esiste già.
+    Ensure a 'Status' SINGLE_SELECT field exists in the project.
+    Returns the field ID.
     """
-    # Opzioni della select con colore e descrizione
-    options = [
-        {"name": "Backlog", "color": "GRAY", "description": "Task in Backlog"},
-        {"name": "In Progress", "color": "BLUE", "description": "Task in Progress"},
-        {"name": "Review", "color": "YELLOW", "description": "Task under Review"},
-        {"name": "Done", "color": "GREEN", "description": "Completed Task"},
-        {"name": "Blocked", "color": "RED", "description": "Blocked Task"},
-        {"name": "On Hold", "color": "ORANGE", "description": "Task on Hold"},
-        {"name": "QA", "color": "PURPLE", "description": "Quality Assurance"}
-    ]
-
-    # Recupera i campi esistenti del progetto
     query = """
     query($projectId: ID!) {
       node(id: $projectId) {
@@ -344,13 +213,16 @@ def create_status_field(project_id: str):
     result = run_query(query, {"projectId": project_id})
     existing_fields = result["data"]["node"]["fields"]["nodes"]
     
-    # Controlla se il campo Status esiste già
+    # Filter out any node without 'name'
+    existing_fields = [f for f in existing_fields if "name" in f]
+
+    # Check if Status field exists
     for field in existing_fields:
         if field["name"] == "Status":
-            print(f"[INFO] Field 'Status' già presente nel progetto {project_id}")
+            print(f"[INFO] Field 'Status' already exists in project {project_id}")
             return field["id"]
 
-    # Crea il campo SINGLE_SELECT
+    # Create Status field
     mutation = """
     mutation($projectId: ID!, $options: [ProjectV2SingleSelectFieldOptionInput!]!) {
       createProjectV2Field(input: {
@@ -360,16 +232,52 @@ def create_status_field(project_id: str):
         singleSelectOptions: $options
       }) {
         projectV2Field {
-          id
-          name
+          ... on ProjectV2SingleSelectField {
+            id
+            name
+          }
         }
       }
     }
     """
-    result = run_query(mutation, {"projectId": project_id, "options": options})
+    result = run_query(mutation, {"projectId": project_id, "options": STATUS_OPTIONS})
     field_id = result["data"]["createProjectV2Field"]["projectV2Field"]["id"]
-    print(f"[INFO] Campo 'Status' creato con ID {field_id}")
+    print(f"[INFO] Created 'Status' field with ID {field_id}")
     return field_id
+
+def sync_project_fields(project_id: str):
+    """
+    Sync required fields into the project.
+    Currently ensures 'Status' exists.
+    """
+    query = """
+    query($projectId: ID!) {
+      node(id: $projectId) {
+        ... on ProjectV2 {
+          fields(first: 50) {
+            nodes {
+              ... on ProjectV2FieldCommon {
+                id
+                name
+              }
+            }
+          }
+        }
+      }
+    }
+    """
+    result = run_query(query, {"projectId": project_id})
+    nodes = result["data"]["node"]["fields"]["nodes"]
+    existing_fields = [f["name"] for f in nodes if "name" in f]
+    
+    print(f"[INFO] Existing fields: {existing_fields}")
+
+    if "Status" not in existing_fields:
+        print(f"[INFO] Creating missing 'Status' field for project {project_id}")
+        create_status_field(project_id)
+    else:
+        print(f"[INFO] 'Status' field already exists for project {project_id}")
+
 
 # --------------------
 # MASTER SYNC helpers
