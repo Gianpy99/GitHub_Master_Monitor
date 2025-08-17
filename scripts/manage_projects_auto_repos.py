@@ -88,7 +88,7 @@ def get_user_id(username):
     return result["data"]["user"]["id"]
 
 def create_project_if_missing(owner_id, repo_name):
-    # 1. Lista progetti già esistenti nell'owner
+    # 1. Lista progetti giÃ  esistenti nell'owner
     query = """
     query($ownerId: ID!) {
       node(id: $ownerId) {
@@ -106,12 +106,12 @@ def create_project_if_missing(owner_id, repo_name):
     result = run_query(query, {"ownerId": owner_id})
     existing_projects = result["data"]["node"]["projectsV2"]["nodes"]
 
-    # 2. Se già esiste con quel nome → riusa
+    # 2. Se giÃ  esiste con quel nome â†' riusa
     for p in existing_projects:
         if p["title"] == f"{repo_name} Project":
             return p["id"]
 
-    # 3. Se non c'è → crealo
+    # 3. Se non c'Ã¨ â†' crealo
     mutation = """
     mutation($ownerId: ID!, $title: String!) {
       createProjectV2(input: {ownerId: $ownerId, title: $title}) {
@@ -212,7 +212,7 @@ STATUS_OPTIONS = [
 
 def create_status_field(project_id: str):
     """
-    Crea un campo 'Status' SINGLE_SELECT nel progetto GitHub se non esiste già.
+    Crea un campo 'Status' SINGLE_SELECT nel progetto GitHub se non esiste giÃ .
     """
     options = [
         {"name": "Backlog", "color": "GRAY", "description": "Task in Backlog"},
@@ -246,7 +246,7 @@ def create_status_field(project_id: str):
 
     for field in existing_fields:
         if field.get("__typename") == "ProjectV2SingleSelectField" and field.get("name") == "Status":
-            print(f"[INFO] Field 'Status' già presente nel progetto {project_id}")
+            print(f"[INFO] Field 'Status' giÃ  presente nel progetto {project_id}")
             return field["id"]
 
     mutation = """
@@ -400,19 +400,86 @@ def sync_project_fields(project_id: str):
 # MASTER SYNC helpers
 # --------------------
 def get_project_fields(project_id):
+    """
+    Get project fields mapping with comprehensive field type support and error handling.
+    """
     query = """
-    query($id:ID!){
-      node(id:$id) { ... on ProjectV2 { fields(first:20){ nodes { ... on ProjectV2SingleSelectField { id name } } } } }
+    query($id: ID!) {
+      node(id: $id) {
+        ... on ProjectV2 {
+          fields(first: 50) {
+            nodes {
+              __typename
+              ... on ProjectV2Field {
+                id
+                name
+              }
+              ... on ProjectV2IterationField {
+                id
+                name
+              }
+              ... on ProjectV2SingleSelectField {
+                id
+                name
+                options {
+                  id
+                  name
+                }
+              }
+            }
+          }
+        }
+      }
     }
     """
-    fields = run_query(query, {"id": project_id})["data"]["node"]["fields"]["nodes"]
-    return {f["name"]: f["id"] for f in fields}
+    
+    try:
+        result = run_query(query, {"id": project_id})
+        
+        if "errors" in result:
+            print(f"[ERROR] GraphQL errors getting fields for {project_id}: {result['errors']}")
+            return {}
+            
+        if not result.get("data") or not result["data"].get("node"):
+            print(f"[ERROR] Invalid response structure for project {project_id}: {result}")
+            return {}
+            
+        fields = result["data"]["node"]["fields"]["nodes"]
+        
+        # Debug: print the fields structure to understand what we're getting
+        print(f"[DEBUG] Raw fields from project {project_id}: {fields}")
+        
+        # Filter out fields that don't have both name and id - be extra safe
+        field_mapping = {}
+        for field in fields:
+            try:
+                if (isinstance(field, dict) and 
+                    field.get("name") is not None and 
+                    field.get("id") is not None and
+                    len(str(field.get("name")).strip()) > 0):
+                    field_mapping[field["name"]] = field["id"]
+                else:
+                    print(f"[DEBUG] Skipping field without valid name/id: {field}")
+            except Exception as field_error:
+                print(f"[DEBUG] Error processing field {field}: {field_error}")
+                continue
+        
+        print(f"[DEBUG] Final field mapping for {project_id}: {field_mapping}")
+        return field_mapping
+        
+    except Exception as e:
+        print(f"[ERROR] Failed to get project fields for {project_id}: {e}")
+        import traceback
+        print(f"[ERROR] Full traceback: {traceback.format_exc()}")
+        return {}
 
 def add_repo_to_master_project(master_project_id, repo_id, repo_name, status="Backlog"):
     """
     Adds a repository as a project item to the master project.
     Since repositories can't be added directly as items, we create a draft issue instead.
     """
+    print(f"[DEBUG] Adding repo {repo_name} to master project {master_project_id}")
+    
     # Create a draft issue to represent the repository
     mutation_draft = """
     mutation($projectId: ID!, $title: String!, $body: String!) {
@@ -431,39 +498,57 @@ def add_repo_to_master_project(master_project_id, repo_id, repo_name, status="Ba
     draft_title = f"Repository: {repo_name}"
     draft_body = f"This item represents the repository {repo_name} for project tracking purposes."
     
-    result = run_query(mutation_draft, {
-        "projectId": master_project_id,
-        "title": draft_title,
-        "body": draft_body
-    })
-    
-    item_id = result["data"]["addProjectV2DraftIssue"]["projectItem"]["id"]
-
-    # Set the status field
-    master_fields = get_project_fields(master_project_id)
-    if "Status" in master_fields:
-        status_field_id = master_fields["Status"]
-        
-        mutation_status = """
-        mutation($itemId: ID!, $fieldId: ID!, $value: String!) {
-          updateProjectV2ItemField(input: {
-            itemId: $itemId,
-            fieldId: $fieldId,
-            value: $value
-          }) {
-            projectV2Item { id }
-          }
-        }
-        """
-        
-        run_query(mutation_status, {
-            "itemId": item_id,
-            "fieldId": status_field_id,
-            "value": status
+    try:
+        result = run_query(mutation_draft, {
+            "projectId": master_project_id,
+            "title": draft_title,
+            "body": draft_body
         })
+        
+        item_id = result["data"]["addProjectV2DraftIssue"]["projectItem"]["id"]
+        print(f"[DEBUG] Created draft issue with item_id: {item_id}")
 
-    print(f"[SYNC] Added repo {repo_name} to Master project with status '{status}'")
-    return item_id
+        # Set the status field - with error handling
+        print(f"[DEBUG] Getting master project fields...")
+        master_fields = get_project_fields(master_project_id)
+        print(f"[DEBUG] Master fields received: {master_fields}")
+        
+        if "Status" in master_fields:
+            status_field_id = master_fields["Status"]
+            print(f"[DEBUG] Found Status field with ID: {status_field_id}")
+            
+            mutation_status = """
+            mutation($itemId: ID!, $fieldId: ID!, $value: String!) {
+              updateProjectV2ItemField(input: {
+                itemId: $itemId,
+                fieldId: $fieldId,
+                value: $value
+              }) {
+                projectV2Item { id }
+              }
+            }
+            """
+            
+            try:
+                run_query(mutation_status, {
+                    "itemId": item_id,
+                    "fieldId": status_field_id,
+                    "value": status
+                })
+                print(f"[DEBUG] Successfully set status to '{status}'")
+            except Exception as status_error:
+                print(f"[WARNING] Failed to set status field: {status_error}")
+        else:
+            print(f"[WARNING] No 'Status' field found in master project fields: {list(master_fields.keys())}")
+
+        print(f"[SYNC] Added repo {repo_name} to Master project with status '{status}'")
+        return item_id
+        
+    except Exception as e:
+        print(f"[ERROR] Failed to add repo {repo_name} to master project: {e}")
+        import traceback
+        print(f"[ERROR] Full traceback: {traceback.format_exc()}")
+        raise
 
 def check_repo_in_master(master_project_id, repo_name):
     """
