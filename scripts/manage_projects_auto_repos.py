@@ -189,20 +189,40 @@ STATUS_OPTIONS = [
     {"name": "QA", "color": "PURPLE", "description": "Quality Assurance"}
 ]
 
-def create_status_field(project_id: str):
+def get_project_items(project_id):
     """
-    Ensure a 'Status' SINGLE_SELECT field exists in the project.
-    Returns the field ID.
+    Recupera tutti gli item di un ProjectV2, includendo solo repository
+    e leggendo correttamente i campi SINGLE_SELECT come Status.
     """
     query = """
-    query($projectId: ID!) {
-      node(id: $projectId) {
+    query($id: ID!) {
+      node(id: $id) {
         ... on ProjectV2 {
-          fields(first: 50) {
+          items(first: 100) {
             nodes {
-              ... on ProjectV2SingleSelectField {
-                id
-                name
+              id
+              content {
+                __typename
+                ... on Repository {
+                  id
+                  name
+                  url
+                }
+              }
+              fieldValues(first: 10) {
+                nodes {
+                  __typename
+                  ... on ProjectV2ItemFieldSingleSelectValue {
+                    field {
+                      __typename
+                      ... on ProjectV2SingleSelectField {
+                        id
+                        name
+                      }
+                    }
+                    name
+                  }
+                }
               }
             }
           }
@@ -210,40 +230,33 @@ def create_status_field(project_id: str):
       }
     }
     """
-    result = run_query(query, {"projectId": project_id})
-    existing_fields = result["data"]["node"]["fields"]["nodes"]
-    
-    # Filter out any node without 'name'
-    existing_fields = [f for f in existing_fields if "name" in f]
+    items_list = []
+    result = run_query(query, {"id": project_id})
 
-    # Check if Status field exists
-    for field in existing_fields:
-        if field["name"] == "Status":
-            print(f"[INFO] Field 'Status' already exists in project {project_id}")
-            return field["id"]
+    nodes = result.get("data", {}).get("node", {}).get("items", {}).get("nodes", [])
+    for item in nodes:
+        content = item.get("content")
+        content_id = None
+        if content and content.get("__typename") == "Repository":
+            content_id = content["id"]
 
-    # Create Status field
-    mutation = """
-    mutation($projectId: ID!, $options: [ProjectV2SingleSelectFieldOptionInput!]!) {
-      createProjectV2Field(input: {
-        projectId: $projectId,
-        name: "Status",
-        dataType: SINGLE_SELECT,
-        singleSelectOptions: $options
-      }) {
-        projectV2Field {
-          ... on ProjectV2SingleSelectField {
-            id
-            name
-          }
-        }
-      }
-    }
-    """
-    result = run_query(mutation, {"projectId": project_id, "options": STATUS_OPTIONS})
-    field_id = result["data"]["createProjectV2Field"]["projectV2Field"]["id"]
-    print(f"[INFO] Created 'Status' field with ID {field_id}")
-    return field_id
+        status = None
+        for fv in item.get("fieldValues", {}).get("nodes", []):
+            if fv.get("__typename") != "ProjectV2ItemFieldSingleSelectValue":
+                continue
+            field = fv.get("field")
+            if not field or field.get("__typename") != "ProjectV2SingleSelectField":
+                continue
+            if field.get("name") == "Status":
+                status = fv.get("name")
+
+        items_list.append({
+            "item_id": item["id"],
+            "repo_id": content_id,
+            "status": status
+        })
+
+    return items_list
 
 def sync_project_fields(project_id: str):
     """
