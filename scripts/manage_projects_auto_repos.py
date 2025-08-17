@@ -133,7 +133,14 @@ def sync_project_fields(project_id):
             print(f"[INFO] Campo '{field['name']}' già presente")
             continue
 
-        options = [{"name": desc, "color": color} for desc, color in zip(field["description"], field["color"])]
+        #options = [{"name": desc, "color": color} for desc, color in zip(field["description"], field["color"])]
+        options = [
+          {"name": "High", "color": "RED", "description": ""},
+          {"name": "Medium-High", "color": "ORANGE", "description": ""},
+          {"name": "Medium", "color": "YELLOW", "description": ""},
+          {"name": "Low", "color": "GREEN", "description": ""}
+      ]
+
         mutation = """
         mutation($projectId: ID!, $options: [ProjectV2SingleSelectFieldOptionInput!]!) {
           createProjectV2Field(input: {
