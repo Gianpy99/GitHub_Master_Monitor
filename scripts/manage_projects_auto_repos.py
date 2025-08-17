@@ -20,14 +20,143 @@ API_URL = "https://api.github.com/graphql"
 # --------------------
 # GRAPHQL helper
 # --------------------
+# --- Config ---
+USERNAME = "gianpy99"
+MASTER_PROJECT_ID = "ID_MASTER"
+
+FIELDS_TO_CREATE = [
+    {"name": "Status", "color": ["GRAY", "BLUE", "YELLOW", "GREEN", "RED", "ORANGE", "PURPLE"], 
+     "description": ["Backlog", "In Progress", "Review", "Done", "Blocked", "On Hold", "QA"]},
+    {"name": "Priority", "color": ["RED", "ORANGE", "YELLOW", "GREEN"], 
+     "description": ["High", "Medium-High", "Medium", "Low"]},
+    {"name": "Type", "color": ["BLUE", "GREEN", "YELLOW", "RED"], 
+     "description": ["Bug", "Feature", "Chore", "Improvement"]},
+    {"name": "Estimate", "color": ["GRAY"], 
+     "description": ["Story Points Estimate"]},
+    {"name": "Owner", "color": ["GRAY"], 
+     "description": ["Assigned User"]},
+    {"name": "Due Date", "color": ["GRAY"], 
+     "description": ["Deadline"]},
+    {"name": "Sprint", "color": ["GRAY"], 
+     "description": ["Sprint Name"]}
+]
+
+# --- Funzioni base ---
 def run_query(query, variables=None):
-    response = requests.post(API_URL, json={"query": query, "variables": variables}, headers=HEADERS)
-    if response.status_code != 200:
-        raise Exception(f"Query failed with status {response.status_code}: {response.text}")
+    """Esegue una query GraphQL con autenticazione."""
+    import requests
+    import os
+
+    headers = {"Authorization": f"Bearer {os.getenv('GITHUB_TOKEN')}"}
+    json_data = {"query": query, "variables": variables or {}}
+    response = requests.post("https://api.github.com/graphql", json=json_data, headers=headers)
     result = response.json()
     if "errors" in result:
         raise Exception(f"GraphQL error: {result['errors']}")
     return result
+
+def get_user_repos(username):
+    query = """
+    query($username: String!) {
+      user(login: $username) {
+        repositories(first: 100) {
+          nodes {
+            name
+            id
+          }
+        }
+      }
+    }
+    """
+    result = run_query(query, {"username": username})
+    return result["data"]["user"]["repositories"]["nodes"]
+
+def create_project_if_missing(repo_id, repo_name):
+    # Controlla se esiste già
+    query = """
+    query($repoId: ID!) {
+      node(id: $repoId) {
+        ... on Repository {
+          projectsV2(first: 50) {
+            nodes {
+              id
+              title
+            }
+          }
+        }
+      }
+    }
+    """
+    result = run_query(query, {"repoId": repo_id})
+    existing_projects = result["data"]["node"]["projectsV2"]["nodes"]
+    if existing_projects:
+        print(f"[INFO] Progetto già presente per {repo_name}")
+        return existing_projects[0]["id"]
+
+    # Crea il progetto
+    mutation = """
+    mutation($repoId: ID!, $title: String!) {
+      createProjectV2(input: {repositoryId: $repoId, title: $title}) {
+        projectV2 {
+          id
+        }
+      }
+    }
+    """
+    result = run_query(mutation, {"repoId": repo_id, "title": f"{repo_name} Project"})
+    project_id = result["data"]["createProjectV2"]["projectV2"]["id"]
+    print(f"[INFO] Progetto creato per {repo_name} con ID {project_id}")
+    return project_id
+
+def sync_project_fields(project_id):
+    """Crea i campi mancanti nel progetto."""
+    # Recupera i campi esistenti
+    query = """
+    query($projectId: ID!) {
+      node(id: $projectId) {
+        ... on ProjectV2 {
+          fields(first: 50) {
+            nodes {
+              ... on ProjectV2SingleSelectField {
+                id
+                name
+              }
+            }
+          }
+        }
+      }
+    }
+    """
+    result = run_query(query, {"projectId": project_id})
+    existing_fields = result["data"]["node"]["fields"]["nodes"]
+    existing_fields = [f for f in existing_fields if "name" in f]
+    existing_names = {f["name"] for f in existing_fields}
+
+    for field in FIELDS_TO_CREATE:
+        if field["name"] in existing_names:
+            print(f"[INFO] Campo '{field['name']}' già presente")
+            continue
+
+        options = [{"name": desc, "color": color} for desc, color in zip(field["description"], field["color"])]
+        mutation = """
+        mutation($projectId: ID!, $options: [ProjectV2SingleSelectFieldOptionInput!]!) {
+          createProjectV2Field(input: {
+            projectId: $projectId,
+            name: "%s",
+            dataType: SINGLE_SELECT,
+            singleSelectOptions: $options
+          }) {
+            projectV2Field {
+              id
+              name
+            }
+          }
+        }
+        """ % field["name"]
+
+        result = run_query(mutation, {"projectId": project_id, "options": options})
+        field_id = result["data"]["createProjectV2Field"]["projectV2Field"]["id"]
+        print(f"[INFO] Campo '{field['name']}' creato con ID {field_id}")
 
 # --------------------
 # USER / REPO helpers
@@ -245,6 +374,26 @@ def save_mapping(mapping):
 # --------------------
 # MAIN
 # --------------------
+
+
+
+
+# --- Main ---
+def main():
+    repos = get_user_repos(USERNAME)
+    print(f"[INFO] Trovati {len(repos)} repository.")
+
+    for repo in repos:
+        repo_name = repo["name"]
+        repo_id = repo["id"]
+        print(f"[INFO] Processing repository: {repo_name}")
+
+        project_id = create_project_if_missing(repo_id, repo_name)
+        sync_project_fields(project_id)
+
+        # TODO: sincronizzazione con master project se necessario
+
+
 def main():
     mapping = load_mapping()
 
