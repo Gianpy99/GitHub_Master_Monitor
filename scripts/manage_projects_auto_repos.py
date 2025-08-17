@@ -374,26 +374,6 @@ def save_mapping(mapping):
 # --------------------
 # MAIN
 # --------------------
-
-
-
-
-# --- Main ---
-def main():
-    repos = get_user_repos(USERNAME)
-    print(f"[INFO] Trovati {len(repos)} repository.")
-
-    for repo in repos:
-        repo_name = repo["name"]
-        repo_id = repo["id"]
-        print(f"[INFO] Processing repository: {repo_name}")
-
-        project_id = create_project_if_missing(repo_id, repo_name)
-        sync_project_fields(project_id)
-
-        # TODO: sincronizzazione con master project se necessario
-
-
 def main():
     mapping = load_mapping()
 
@@ -419,7 +399,10 @@ def main():
     # --- Repo Projects + Sync ---
     for repo in repos:
         repo_name = repo["name"]
+        repo_id = repo["id"]
         print(f"\n[INFO] Checking repo: {repo_name}")
+        project_id = create_project_if_missing(repo_id, repo_name)
+        sync_project_fields(project_id)
 
         if repo_name in mapping["repos"]:
             repo_project_id = mapping["repos"][repo_name]
