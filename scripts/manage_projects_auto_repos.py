@@ -100,6 +100,7 @@ def create_status_field(project_id):
         {"name": col, "color": COLORS[i % len(COLORS)], "description": ""}
         for i, col in enumerate(COLUMNS)
     ]
+    mutation = """
 
     mutation($projectId: ID!, $options: [ProjectV2SingleSelectFieldOptionInput!]!) {
         createProjectV2Field(input: {
@@ -116,7 +117,7 @@ def create_status_field(project_id):
     }
     }
     }
-    }
+    }"""
 
     result = run_query(mutation, {"projectId": project_id, "options": options})
     return result["data"]["createProjectV2Field"]["projectV2Field"]["id"]
