@@ -1,139 +1,248 @@
 import os
 import json
-from github import Github, GithubException
+import requests
 
-# ------------------------
-# CONFIGURATION
-# ------------------------
+# --------------------
+# CONFIG
+# --------------------
 GITHUB_TOKEN = os.environ.get("GITHUB_TOKEN")
+USERNAME = "gianpy99"
+MASTER_PROJECT_TITLE = "Master Project"
 MAPPING_FILE = "repo_project_mapping.json"
-MASTER_PROJECT_ID = int(os.environ.get("MASTER_PROJECT_ID"))
-GITHUB_REPO = os.environ.get("GITHUB_REPO")  # e.g., gianpy99/github-master-monitor
 
-# Professional 7-step columns
-COLUMNS = [
-    "MVP / Idea",
-    "PRD / Defined",
-    "Dev / Implementation",
-    "Code Review / QA Prep",
-    "CI/CD / Integration",
-    "Testing / Verification",
-    "Release / Done"
-]
+HEADERS = {
+    "Authorization": f"Bearer {GITHUB_TOKEN}",
+    "Content-Type": "application/json"
+}
 
-# ------------------------
-# HELPER FUNCTIONS
-# ------------------------
+API_URL = "https://api.github.com/graphql"
+
+# --------------------
+# GRAPHQL helper
+# --------------------
+def run_query(query, variables=None):
+    response = requests.post(API_URL, json={"query": query, "variables": variables}, headers=HEADERS)
+    if response.status_code != 200:
+        raise Exception(f"Query failed with status {response.status_code}: {response.text}")
+    result = response.json()
+    if "errors" in result:
+        raise Exception(f"GraphQL error: {result['errors']}")
+    return result
+
+# --------------------
+# USER / REPO helpers
+# --------------------
+def get_user_id(username):
+    query = """
+    query($login: String!) { user(login: $login) { id } }
+    """
+    return run_query(query, {"login": username})["data"]["user"]["id"]
+
+def get_user_repositories(username):
+    query = """
+    query($login: String!) {
+      user(login: $login) {
+        repositories(first: 100, ownerAffiliations: OWNER) {
+          nodes { id name }
+        }
+      }
+    }
+    """
+    return run_query(query, {"login": username})["data"]["user"]["repositories"]["nodes"]
+
+# --------------------
+# PROJECT helpers
+# --------------------
+def get_projects_for_owner(owner_login):
+    query = """
+    query($login: String!) {
+      user(login: $login) {
+        projectsV2(first: 50) { nodes { id title } }
+      }
+    }
+    """
+    return run_query(query, {"login": owner_login})["data"]["user"]["projectsV2"]["nodes"]
+
+def get_projects_for_repo(owner, repo_name):
+    query = """
+    query($owner: String!, $repo: String!) {
+      repository(owner: $owner, name: $repo) {
+        projectsV2(first: 10) { nodes { id title } }
+      }
+    }
+    """
+    return run_query(query, {"owner": owner, "repo": repo_name})["data"]["repository"]["projectsV2"]["nodes"]
+
+def create_project(owner_id, title):
+    mutation = """
+    mutation($ownerId: ID!, $title: String!) {
+      createProjectV2(input: {ownerId: $ownerId, title: $title}) {
+        projectV2 { id title }
+      }
+    }
+    """
+    return run_query(mutation, {"ownerId": owner_id, "title": title})["data"]["createProjectV2"]["projectV2"]["id"]
+
+def create_status_field(project_id):
+    mutation = """
+    mutation($projectId: ID!) {
+      createProjectV2Field(input: {
+        projectId: $projectId,
+        name: "Status",
+        dataType: SINGLE_SELECT,
+        singleSelectOptions: [
+          {name: "PRD Defined"},
+          {name: "MVP Scoping"},
+          {name: "Development"},
+          {name: "CI/CD Setup"},
+          {name: "Testing / QA"},
+          {name: "Release Prep"},
+          {name: "Released"}
+        ]
+      }) { projectV2Field { id name } }
+    }
+    """
+    run_query(mutation, {"projectId": project_id})
+    print(f"[INFO] Added Status field to project {project_id}")
+
+# --------------------
+# MASTER SYNC helpers
+# --------------------
+def get_project_fields(project_id):
+    query = """
+    query($id:ID!){
+      node(id:$id) { ... on ProjectV2 { fields(first:20){ nodes { ... on ProjectV2SingleSelectField { id name } } } } }
+    }
+    """
+    fields = run_query(query, {"id": project_id})["data"]["node"]["fields"]["nodes"]
+    return {f["name"]: f["id"] for f in fields}
+
+def get_project_items(project_id):
+    query = """
+    query($id:ID!){
+      node(id:$id){
+        ... on ProjectV2{
+          items(first:100){
+            nodes{
+              id
+              content { ... on Repository { id name url } }
+              fieldValues(first:10){
+                nodes{
+                  ... on ProjectV2ItemFieldSingleSelectValue{
+                    field { id name }
+                    name
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+    """
+    items_list = []
+    result = run_query(query, {"id": project_id})
+    for item in result["data"]["node"]["items"]["nodes"]:
+        status = None
+        content_id = item["content"]["id"] if item["content"] else None
+        for fv in item["fieldValues"]["nodes"]:
+            if fv["field"]["name"] == "Status":
+                status = fv["name"]
+        items_list.append({"item_id": item["id"], "repo_id": content_id, "status": status})
+    return items_list
+
+def add_repo_item_to_master(master_project_id, repo_id, status):
+    mutation_add = """
+    mutation($projectId:ID!, $contentId:ID!){
+      addProjectV2ItemById(input:{projectId:$projectId, contentId:$contentId}){
+        item { id }
+      }
+    }
+    """
+    result = run_query(mutation_add, {"projectId": master_project_id, "contentId": repo_id})
+    item_id = result["data"]["addProjectV2ItemById"]["item"]["id"]
+
+    master_fields = get_project_fields(master_project_id)
+    status_field_id = master_fields["Status"]
+
+    mutation_status = """
+    mutation($itemId:ID!, $fieldId:ID!, $value:String!){
+      updateProjectV2ItemField(input:{
+        itemId:$itemId,
+        fieldId:$fieldId,
+        value:$value
+      }) { projectV2Item { id } }
+    }
+    """
+    run_query(mutation_status, {"itemId": item_id, "fieldId": status_field_id, "value": status})
+    print(f"[SYNC] Added repo {repo_id} to Master with status '{status}'")
+
+# --------------------
+# JSON mapping helpers
+# --------------------
 def load_mapping():
     if os.path.exists(MAPPING_FILE):
         with open(MAPPING_FILE, "r") as f:
             return json.load(f)
-    return {}
+    return {"master_project_id": None, "repos": {}}
 
 def save_mapping(mapping):
     with open(MAPPING_FILE, "w") as f:
         json.dump(mapping, f, indent=2)
 
-def fetch_all_repos(g):
-    """
-    Automatically fetch all repositories for the authenticated user
-    """
-    user = g.get_user()
-    return [repo.full_name for repo in user.get_repos()]
-
-def create_project_if_missing(repo):
-    projects = list(repo.get_projects())
-    if projects:
-        print(f"[INFO] Project exists for {repo.full_name}")
-        return projects[0].id
-    print(f"[INFO] Creating project for {repo.full_name}")
-    project = repo.create_project(name="Development Board",
-                                  body="Automated 7-step workflow")
-    for col_name in COLUMNS:
-        project.create_column(col_name)
-    return project.id
-
-def fetch_column_counts(project):
-    counts = {}
-    for col in project.get_columns():
-        counts[col.name] = col.get_cards().totalCount
-    return counts
-
-def calculate_progress(column_counts):
-    done_columns = ["Release / Done"]
-    total_issues = sum(column_counts.values())
-    if total_issues == 0:
-        return 0
-    done_issues = sum(column_counts[col] for col in done_columns if col in column_counts)
-    return round((done_issues / total_issues) * 100, 2)
-
-def update_master_project_card(master_project, repo_name, progress, repo_project_url):
-    column = master_project.get_columns()[0]  # First column: "Repo Overview"
-    existing_cards = list(column.get_cards())
-    card_title = f"{repo_name} – {progress}% done"
-    card_note = f"Project board: {repo_project_url}"
-
-    # Update existing card if present
-    for card in existing_cards:
-        if repo_name in card.note or repo_name in card_title:
-            card.edit(note=card_title)
-            try:
-                comments = list(card.get_comments())
-                if not comments:
-                    card.create_comment(card_note)
-            except Exception:
-                pass
-            return
-
-    # Create new card if not found
-    new_card = column.create_card(note=card_title)
-    try:
-        new_card.create_comment(card_note)
-    except Exception:
-        pass
-
-# ------------------------
-# MAIN LOGIC
-# ------------------------
+# --------------------
+# MAIN
+# --------------------
 def main():
-    g = Github(GITHUB_TOKEN)
     mapping = load_mapping()
 
-    # Automatically fetch all repositories
-    repos_list = fetch_all_repos(g)
-    print(f"[INFO] Found {len(repos_list)} repositories.")
+    print("[INFO] Fetching user and repos...")
+    owner_id = get_user_id(USERNAME)
+    repos = get_user_repositories(USERNAME)
+    print(f"[INFO] Found {len(repos)} repositories.")
 
-    master_project_repo = g.get_repo(GITHUB_REPO)
-    #master_project = master_project_repo.get_project(MASTER_PROJECT_ID)
-    projects = list(master_project_repo.get_projects())
-    master_project = next((p for p in projects if p.id == MASTER_PROJECT_ID), None)
+    # --- Master Project ---
+    master_project_id = mapping.get("master_project_id")
+    if not master_project_id:
+        projects = get_projects_for_owner(USERNAME)
+        master_project = next((p for p in projects if p["title"] == MASTER_PROJECT_TITLE), None)
+        if master_project:
+            master_project_id = master_project["id"]
+        else:
+            master_project_id = create_project(owner_id, MASTER_PROJECT_TITLE)
+            create_status_field(master_project_id)
+        mapping["master_project_id"] = master_project_id
+        save_mapping(mapping)
+    print(f"[RESULT] MASTER_PROJECT_ID={master_project_id}")
 
-    if not master_project:
-        raise ValueError(f"Master project with ID {MASTER_PROJECT_ID} not found in repo {master_project_repo.full_name}")
+    # --- Repo Projects + Sync ---
+    for repo in repos:
+        repo_name = repo["name"]
+        repo_id = repo["id"]
+        print(f"\n[INFO] Checking repo: {repo_name}")
 
-    for repo_name in repos_list:
-        try:
-            repo = g.get_repo(repo_name)
-            # Ensure repo project exists
-            project_id = mapping.get(repo_name)
-            if not project_id:
-                project_id = create_project_if_missing(repo)
-                mapping[repo_name] = project_id
+        if repo_name in mapping["repos"]:
+            repo_project_id = mapping["repos"][repo_name]
+            print(f"[INFO] Repo {repo_name} already tracked with Project ID: {repo_project_id}")
+        else:
+            repo_projects = get_projects_for_repo(USERNAME, repo_name)
+            if repo_projects:
+                repo_project_id = repo_projects[0]["id"]
+            else:
+                repo_project_id = create_project(repo_id, f"{repo_name} Project")
+                create_status_field(repo_project_id)
+            mapping["repos"][repo_name] = repo_project_id
+            save_mapping(mapping)
+            print(f"[INFO] Repo {repo_name} mapped with Project ID: {repo_project_id}")
 
-            # Fetch repo project stats
-            repo_project = repo.get_project(project_id)
-            column_counts = fetch_column_counts(repo_project)
-            progress = calculate_progress(column_counts)
+        # --- Sync to Master ---
+        items = get_project_items(repo_project_id)
+        master_items = get_project_items(master_project_id)
+        master_repo_ids = {item["repo_id"] for item in master_items if item["repo_id"]}
 
-            # Update Master Project
-            update_master_project_card(master_project, repo_name, progress, repo_project.html_url)
-            print(f"[INFO] {repo_name}: {progress}% done")
-
-        except GithubException as e:
-            print(f"[ERROR] Failed for {repo_name}: {e}")
-
-    save_mapping(mapping)
-    print("[INFO] All projects created/updated successfully!")
+        for item in items:
+            if item["repo_id"] not in master_repo_ids and item["repo_id"]:
+                add_repo_item_to_master(master_project_id, item["repo_id"], item["status"] or "PRD Defined")
 
 if __name__ == "__main__":
     main()
