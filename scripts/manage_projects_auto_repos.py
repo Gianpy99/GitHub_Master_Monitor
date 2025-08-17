@@ -497,6 +497,28 @@ def save_mapping(mapping):
 def main():
     mapping = load_mapping()
 
+    # Test authentication first
+    token = os.environ.get("MASTER_PROJECT_ID")
+    if not token:
+        raise Exception("MASTER_PROJECT_ID environment variable not set")
+    
+    if not token.startswith(('ghp_', 'github_pat_')):
+        print(f"[WARNING] Token format looks unusual. Expected to start with 'ghp_' or 'github_pat_', got: {token[:10]}...")
+
+    print("[INFO] Testing GitHub authentication...")
+    try:
+        # Simple test query to verify authentication
+        test_query = "query { viewer { login } }"
+        test_result = run_query(test_query)
+        current_user = test_result["data"]["viewer"]["login"]
+        print(f"[INFO] Successfully authenticated as: {current_user}")
+        
+        if current_user != USERNAME:
+            print(f"[WARNING] Authenticated as '{current_user}' but script is configured for '{USERNAME}'")
+    except Exception as e:
+        print(f"[ERROR] Authentication test failed: {e}")
+        return
+
     print("[INFO] Fetching user and repos...")
     owner_id = get_user_id(USERNAME)  # recupera ID dello user
     repos = get_user_repos(USERNAME)
