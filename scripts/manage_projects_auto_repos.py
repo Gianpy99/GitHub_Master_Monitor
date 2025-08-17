@@ -50,6 +50,9 @@ def run_query(query, variables=None):
     if not token:
         raise Exception("MASTER_PROJECT_ID environment variable not set")
     
+    # Clean any whitespace from token
+    token = token.strip()
+    
     headers = {"Authorization": f"Bearer {token}"}
     json_data = {"query": query, "variables": variables or {}}
     response = requests.post("https://api.github.com/graphql", json=json_data, headers=headers)
@@ -502,19 +505,43 @@ def main():
     if not token:
         raise Exception("MASTER_PROJECT_ID environment variable not set")
     
-    if not token.startswith(('ghp_', 'github_pat_')):
-        print(f"[WARNING] Token format looks unusual. Expected to start with 'ghp_' or 'github_pat_', got: {token[:10]}...")
+    # Debug token info
+    print(f"[DEBUG] Token length: {len(token)}")
+    print(f"[DEBUG] Token first 10 chars: '{token[:10]}'")
+    print(f"[DEBUG] Token last 10 chars: '{token[-10:]}'")
+    print(f"[DEBUG] Token has whitespace: {token != token.strip()}")
+    
+    # Clean the token of any whitespace
+    clean_token = token.strip()
+    
+    if not clean_token.startswith(('ghp_', 'github_pat_')):
+        print(f"[WARNING] Token format looks unusual. Expected to start with 'ghp_' or 'github_pat_'")
+        print(f"[DEBUG] Clean token first 15 chars: '{clean_token[:15]}'")
 
     print("[INFO] Testing GitHub authentication...")
     try:
-        # Simple test query to verify authentication
-        test_query = "query { viewer { login } }"
-        test_result = run_query(test_query)
-        current_user = test_result["data"]["viewer"]["login"]
-        print(f"[INFO] Successfully authenticated as: {current_user}")
+        # Use the cleaned token for the test
+        headers = {"Authorization": f"Bearer {clean_token}"}
+        json_data = {"query": "query { viewer { login } }"}
+        response = requests.post("https://api.github.com/graphql", json=json_data, headers=headers)
         
-        if current_user != USERNAME:
-            print(f"[WARNING] Authenticated as '{current_user}' but script is configured for '{USERNAME}'")
+        print(f"[DEBUG] Response status: {response.status_code}")
+        if response.status_code != 200:
+            print(f"[DEBUG] Response headers: {dict(response.headers)}")
+            print(f"[DEBUG] Response text: {response.text}")
+        
+        result = response.json()
+        
+        if "data" in result and result["data"] and "viewer" in result["data"]:
+            current_user = result["data"]["viewer"]["login"]
+            print(f"[INFO] Successfully authenticated as: {current_user}")
+            
+            if current_user != USERNAME:
+                print(f"[WARNING] Authenticated as '{current_user}' but script is configured for '{USERNAME}'")
+        else:
+            print(f"[ERROR] Unexpected response: {result}")
+            return
+            
     except Exception as e:
         print(f"[ERROR] Authentication test failed: {e}")
         return
