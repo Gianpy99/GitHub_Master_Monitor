@@ -5,7 +5,7 @@ import requests
 # --------------------
 # CONFIG
 # --------------------
-GITHUB_TOKEN = os.environ.get("GITHUB_TOKEN")
+GITHUB_TOKEN = os.environ.get("MASTER_PROJECT_ID")  # This contains your auth token
 USERNAME = "gianpy99"
 MASTER_PROJECT_TITLE = "Master Project"
 MAPPING_FILE = "repo_project_mapping.json"
@@ -46,7 +46,7 @@ def run_query(query, variables=None):
     import requests
     import os
 
-    headers = {"Authorization": f"Bearer {os.getenv('GITHUB_TOKEN')}"}
+    headers = {"Authorization": f"Bearer {os.getenv('MASTER_PROJECT_ID')}"}  # Using the auth token
     json_data = {"query": query, "variables": variables or {}}
     response = requests.post("https://api.github.com/graphql", json=json_data, headers=headers)
     result = response.json()
@@ -483,14 +483,25 @@ def main():
 
     # --- Master Project ---
     master_project_id = mapping.get("master_project_id")
+    
+    # Check if we have a predefined master project ID from environment
+    env_master_project_id = os.environ.get("MASTER_PROJECT_ID_2")
+    
     if not master_project_id:
-        projects = get_projects_for_owner(USERNAME)
-        master_project = next((p for p in projects if p["title"] == MASTER_PROJECT_TITLE), None)
-        if master_project:
-            master_project_id = master_project["id"]
+        if env_master_project_id:
+            # Use the predefined master project ID from environment
+            master_project_id = env_master_project_id
+            print(f"[INFO] Using predefined master project ID from environment")
         else:
-            master_project_id = create_project(owner_id, MASTER_PROJECT_TITLE)
-            create_status_field(master_project_id)
+            # Look for existing or create new master project
+            projects = get_projects_for_owner(USERNAME)
+            master_project = next((p for p in projects if p["title"] == MASTER_PROJECT_TITLE), None)
+            if master_project:
+                master_project_id = master_project["id"]
+            else:
+                master_project_id = create_project(owner_id, MASTER_PROJECT_TITLE)
+                create_status_field(master_project_id)
+        
         mapping["master_project_id"] = master_project_id
         save_mapping(mapping)
     print(f"[RESULT] MASTER_PROJECT_ID={master_project_id}")
