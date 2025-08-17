@@ -55,28 +55,23 @@ def run_query(query, variables=None):
         raise Exception(f"GraphQL error: {result['errors']}")
     return result
 
-def get_user_repos(username):
+def get_user_id(username):
     query = """
     query($username: String!) {
       user(login: $username) {
-        repositories(first: 100) {
-          nodes {
-            name
-            id
-          }
-        }
+        id
       }
     }
     """
     result = run_query(query, {"username": username})
-    return result["data"]["user"]["repositories"]["nodes"]
+    return result["data"]["user"]["id"]
 
-def create_project_if_missing(repo_id, repo_name):
-    # Controlla se esiste già
+def create_project_if_missing(owner_id, repo_name):
+    # Recupera tutti i progetti dell'utente
     query = """
-    query($repoId: ID!) {
-      node(id: $repoId) {
-        ... on Repository {
+    query($ownerId: ID!) {
+      node(id: $ownerId) {
+        ... on User {
           projectsV2(first: 50) {
             nodes {
               id
@@ -87,26 +82,28 @@ def create_project_if_missing(repo_id, repo_name):
       }
     }
     """
-    result = run_query(query, {"repoId": repo_id})
+    result = run_query(query, {"ownerId": owner_id})
     existing_projects = result["data"]["node"]["projectsV2"]["nodes"]
-    if existing_projects:
-        print(f"[INFO] Progetto già presente per {repo_name}")
-        return existing_projects[0]["id"]
+    for p in existing_projects:
+        if p["title"] == f"{repo_name} Project":
+            print(f"[INFO] Progetto già presente per {repo_name}")
+            return p["id"]
 
-    # Crea il progetto
+    # Crea il progetto a livello utente
     mutation = """
-    mutation($repoId: ID!, $title: String!) {
-      createProjectV2(input: {repositoryId: $repoId, title: $title}) {
+    mutation($ownerId: ID!, $title: String!) {
+      createProjectV2(input: {ownerId: $ownerId, title: $title}) {
         projectV2 {
           id
         }
       }
     }
     """
-    result = run_query(mutation, {"repoId": repo_id, "title": f"{repo_name} Project"})
+    result = run_query(mutation, {"ownerId": owner_id, "title": f"{repo_name} Project"})
     project_id = result["data"]["createProjectV2"]["projectV2"]["id"]
     print(f"[INFO] Progetto creato per {repo_name} con ID {project_id}")
     return project_id
+
 
 def sync_project_fields(project_id):
     """Crea i campi mancanti nel progetto."""
@@ -375,11 +372,12 @@ def save_mapping(mapping):
 # MAIN
 # --------------------
 def main():
+    
     mapping = load_mapping()
 
     print("[INFO] Fetching user and repos...")
     owner_id = get_user_id(USERNAME)
-    repos = get_user_repositories(USERNAME)
+    repos = get_user_repos(USERNAME)
     print(f"[INFO] Found {len(repos)} repositories.")
 
     # --- Master Project ---
@@ -399,7 +397,7 @@ def main():
     # --- Repo Projects + Sync ---
     for repo in repos:
         repo_name = repo["name"]
-        repo_id = repo["id"]
+        #repo_id = repo["id"]
         print(f"\n[INFO] Checking repo: {repo_name}")
         project_id = create_project_if_missing(repo_id, repo_name)
         sync_project_fields(project_id)
