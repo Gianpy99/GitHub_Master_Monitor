@@ -93,11 +93,11 @@ COLUMNS = [
     "Release / Done"
 ]
 
-COLORS = ["BLUE", "GREEN", "YELLOW", "PURPLE", "PINK", "ORANGE", "RED", "GRAY"]
+COLORS = ["BLUE", "GREEN", "YELLOW", "PURPLE", "PINK", "ORANGE", "RED"]
 
 def create_status_field(project_id):
     options = [
-        {"name": col, "color": COLORS[i % len(COLORS)], "description": ""} 
+        {"name": col, "color": COLORS[i % len(COLORS)], "description": ""}
         for i, col in enumerate(COLUMNS)
     ]
 
@@ -106,7 +106,7 @@ def create_status_field(project_id):
       createProjectV2Field(input: {
         projectId: $projectId,
         name: "Status",
-        fieldType: SINGLE_SELECT,
+        dataType: SINGLE_SELECT,
         singleSelectOptions: $options
       }) {
         projectV2Field {
@@ -116,7 +116,6 @@ def create_status_field(project_id):
       }
     }
     """
-
     result = run_query(mutation, {"projectId": project_id, "options": options})
     return result["data"]["createProjectV2Field"]["projectV2Field"]["id"]
 
