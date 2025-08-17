@@ -104,7 +104,12 @@ def main():
     print(f"[INFO] Found {len(repos_list)} repositories.")
 
     master_project_repo = g.get_repo(GITHUB_REPO)
-    master_project = master_project_repo.get_project(MASTER_PROJECT_ID)
+    #master_project = master_project_repo.get_project(MASTER_PROJECT_ID)
+    projects = list(master_project_repo.get_projects())
+    master_project = next((p for p in projects if p.id == MASTER_PROJECT_ID), None)
+
+    if not master_project:
+        raise ValueError(f"Master project with ID {MASTER_PROJECT_ID} not found in repo {master_project_repo.full_name}")
 
     for repo_name in repos_list:
         try:
