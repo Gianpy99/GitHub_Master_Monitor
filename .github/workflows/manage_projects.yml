@@ -1,9 +1,11 @@
 name: Manage GitHub Projects
 
-on:
-  workflow_dispatch:
-  schedule:
-    - cron: '0 10 * * 1'  # Weekly sync on Monday at 10:00 UTC
+on: 
+  push:
+    branches:
+      - main
+  workflow_dispatch:  # Allows manual triggering of the workflow
+
 
 jobs:
   manage:
