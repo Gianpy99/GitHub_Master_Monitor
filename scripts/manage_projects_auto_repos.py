@@ -212,9 +212,9 @@ STATUS_OPTIONS = [
 
 def create_status_field(project_id: str):
     """
-    Crea un campo 'Status' SINGLE_SELECT nel progetto GitHub se non esiste giÃ .
+    Creates a 'Custom Status' SINGLE_SELECT field in the GitHub project with custom options.
     """
-    options = [
+    desired_options = [
         {"name": "Backlog", "color": "GRAY", "description": "Task in Backlog"},
         {"name": "In Progress", "color": "BLUE", "description": "Task in Progress"},
         {"name": "Review", "color": "YELLOW", "description": "Task under Review"},
@@ -224,6 +224,7 @@ def create_status_field(project_id: str):
         {"name": "QA", "color": "PURPLE", "description": "Quality Assurance"}
     ]
 
+    # Check if Custom Status field already exists
     query = """
     query($projectId: ID!) {
       node(id: $projectId) {
@@ -234,6 +235,12 @@ def create_status_field(project_id: str):
               ... on ProjectV2SingleSelectField {
                 id
                 name
+                options {
+                  id
+                  name
+                  color
+                  description
+                }
               }
             }
           }
@@ -241,19 +248,25 @@ def create_status_field(project_id: str):
       }
     }
     """
+    
     result = run_query(query, {"projectId": project_id})
     existing_fields = result.get("data", {}).get("node", {}).get("fields", {}).get("nodes", [])
 
+    # Check if Custom Status field already exists
     for field in existing_fields:
-        if field.get("__typename") == "ProjectV2SingleSelectField" and field.get("name") == "Status":
-            print(f"[INFO] Field 'Status' giÃ  presente nel progetto {project_id}")
+        if field.get("__typename") == "ProjectV2SingleSelectField" and field.get("name") == "Custom Status":
+            print(f"[INFO] Custom Status field already exists with ID: {field['id']}")
+            existing_options = [opt["name"] for opt in field.get("options", [])]
+            print(f"[INFO] Existing Custom Status options: {existing_options}")
             return field["id"]
-
+    
+    # Create new Custom Status field
+    print(f"[INFO] Creating new 'Custom Status' field with desired options...")
     mutation = """
     mutation($projectId: ID!, $options: [ProjectV2SingleSelectFieldOptionInput!]!) {
       createProjectV2Field(input: {
         projectId: $projectId,
-        name: "Status",
+        name: "Custom Status",
         dataType: SINGLE_SELECT,
         singleSelectOptions: $options
       }) {
@@ -261,15 +274,26 @@ def create_status_field(project_id: str):
           ... on ProjectV2SingleSelectField {
             id
             name
+            options {
+              id
+              name
+            }
           }
         }
       }
     }
     """
-    result = run_query(mutation, {"projectId": project_id, "options": options})
-    field_id = result["data"]["createProjectV2Field"]["projectV2Field"]["id"]
-    print(f"[INFO] Campo 'Status' creato con ID {field_id}")
-    return field_id
+    
+    try:
+        result = run_query(mutation, {"projectId": project_id, "options": desired_options})
+        field = result["data"]["createProjectV2Field"]["projectV2Field"]
+        field_id = field["id"]
+        print(f"[INFO] Created 'Custom Status' field with ID {field_id}")
+        print(f"[INFO] Available options: {[opt['name'] for opt in field.get('options', [])]}")
+        return field_id
+    except Exception as e:
+        print(f"[ERROR] Failed to create Custom Status field: {e}")
+        return None
 
 def get_project_items(project_id: str):
     """
@@ -366,7 +390,7 @@ def get_project_items(project_id: str):
 def sync_project_fields(project_id: str):
     """
     Sync required fields into the project.
-    Currently ensures 'Status' exists.
+    Currently ensures 'Custom Status' exists.
     """
     query = """
     query($projectId: ID!) {
@@ -390,11 +414,11 @@ def sync_project_fields(project_id: str):
     
     print(f"[INFO] Existing fields: {existing_fields}")
 
-    if "Status" not in existing_fields:
-        print(f"[INFO] Creating missing 'Status' field for project {project_id}")
+    if "Custom Status" not in existing_fields:
+        print(f"[INFO] Creating missing 'Custom Status' field for project {project_id}")
         create_status_field(project_id)
     else:
-        print(f"[INFO] 'Status' field already exists for project {project_id}")
+        print(f"[INFO] 'Custom Status' field already exists for project {project_id}")
 
 # --------------------
 # MASTER SYNC helpers
@@ -509,39 +533,105 @@ def add_repo_to_master_project(master_project_id, repo_id, repo_name, status="Ba
         print(f"[DEBUG] Created draft issue with item_id: {item_id}")
 
         # Set the status field - with error handling
-        print(f"[DEBUG] Getting master project fields...")
-        master_fields = get_project_fields(master_project_id)
-        print(f"[DEBUG] Master fields received: {master_fields}")
+        print(f"[DEBUG] Getting master project fields with options...")
         
-        if "Status" in master_fields:
-            status_field_id = master_fields["Status"]
-            print(f"[DEBUG] Found Status field with ID: {status_field_id}")
-            
-            mutation_status = """
-            mutation($itemId: ID!, $fieldId: ID!, $value: String!) {
-              updateProjectV2ItemField(input: {
-                itemId: $itemId,
-                fieldId: $fieldId,
-                value: $value
-              }) {
-                projectV2Item { id }
+        # Get fields with options for SingleSelect fields
+        query_with_options = """
+        query($id: ID!) {
+          node(id: $id) {
+            ... on ProjectV2 {
+              fields(first: 50) {
+                nodes {
+                  __typename
+                  ... on ProjectV2Field {
+                    id
+                    name
+                  }
+                  ... on ProjectV2IterationField {
+                    id
+                    name
+                  }
+                  ... on ProjectV2SingleSelectField {
+                    id
+                    name
+                    options {
+                      id
+                      name
+                    }
+                  }
+                }
               }
             }
-            """
+          }
+        }
+        """
+        
+        fields_result = run_query(query_with_options, {"id": master_project_id})
+        fields = fields_result["data"]["node"]["fields"]["nodes"]
+        
+        print(f"[DEBUG] Raw fields with options: {fields}")
+        
+        # Find the Custom Status field and its options
+        custom_status_field_id = None
+        status_options = {}
+        
+        for field in fields:
+            if (field.get("__typename") == "ProjectV2SingleSelectField" and 
+                field.get("name") == "Custom Status"):
+                custom_status_field_id = field["id"]
+                if "options" in field:
+                    for option in field["options"]:
+                        status_options[option["name"]] = option["id"]
+                break
+        
+        print(f"[DEBUG] Custom Status field ID: {custom_status_field_id}")
+        print(f"[DEBUG] Available status options: {status_options}")
+        
+        if custom_status_field_id and status_options:
+            # Try to find the requested status, fall back to first available option
+            status_option_id = None
+            if status in status_options:
+                status_option_id = status_options[status]
+                print(f"[DEBUG] Found exact match for status '{status}': {status_option_id}")
+            elif status_options:
+                # Fall back to first available option
+                first_option = list(status_options.keys())[0]
+                status_option_id = status_options[first_option]
+                print(f"[WARNING] Status '{status}' not found, using '{first_option}' instead")
             
-            try:
-                run_query(mutation_status, {
-                    "itemId": item_id,
-                    "fieldId": status_field_id,
-                    "value": status
-                })
-                print(f"[DEBUG] Successfully set status to '{status}'")
-            except Exception as status_error:
-                print(f"[WARNING] Failed to set status field: {status_error}")
+            if status_option_id:
+                mutation_status = """
+                mutation($projectId: ID!, $itemId: ID!, $fieldId: ID!, $optionId: String!) {
+                  updateProjectV2ItemFieldValue(input: {
+                    projectId: $projectId,
+                    itemId: $itemId,
+                    fieldId: $fieldId,
+                    value: { singleSelectOptionId: $optionId }
+                  }) {
+                    projectV2Item { id }
+                  }
+                }
+                """
+                
+                try:
+                    run_query(mutation_status, {
+                        "projectId": master_project_id,
+                        "itemId": item_id,
+                        "fieldId": custom_status_field_id,
+                        "optionId": status_option_id
+                    })
+                    actual_status = next(name for name, id in status_options.items() if id == status_option_id)
+                    print(f"[DEBUG] Successfully set Custom Status to '{actual_status}'")
+                except Exception as status_error:
+                    print(f"[WARNING] Failed to set Custom Status field: {status_error}")
+            else:
+                print(f"[WARNING] No valid status option ID found")
         else:
-            print(f"[WARNING] No 'Status' field found in master project fields: {list(master_fields.keys())}")
+            print(f"[WARNING] No Custom Status field found or no options available")
+            print(f"[INFO] Creating Custom Status field for master project...")
+            create_status_field(master_project_id)
 
-        print(f"[SYNC] Added repo {repo_name} to Master project with status '{status}'")
+        print(f"[SYNC] Added repo {repo_name} to Master project")
         return item_id
         
     except Exception as e:
